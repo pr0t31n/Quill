@@ -1060,8 +1060,155 @@ def main() -> int:
             json.dumps(_findings, indent=2), encoding="utf-8")
         _write_findings_csv(project_dir / "findings.csv", _findings)
 
+    _generate_cross_tool_action_items(project_dir)
     log(f"Quill complete — {len(_findings)} finding(s) — output: {project_dir}")
     return 0
+
+
+def _generate_cross_tool_action_items(project_dir: Path) -> None:
+    """Emit cross-tool action items based on Quill analysis findings."""
+    _CLOUD_PATTERNS = ("aws", "azure", "google", "stripe")
+    _API_PATTERNS = ("api key", "api_key", "apikey", "bearer", "jwt", "token")
+
+    fj = project_dir / "findings.json"
+    if not fj.exists():
+        return
+    try:
+        findings = json.loads(fj.read_text(encoding="utf-8"))
+    except Exception:
+        return
+
+    items: list = []
+    seen: set = set()
+
+    def _add(item_type, tool, target, title, desc, priority="MEDIUM",
+             source_finding="", metadata=None):
+        key = (tool.lower(), target.lower(), title.strip().lower())
+        if key in seen:
+            return
+        seen.add(key)
+        items.append({
+            "id": str(uuid.uuid4()),
+            "type": item_type,
+            "recommended_tool": tool,
+            "target": target,
+            "ip": "", "port": 0, "hostname": "",
+            "title": title,
+            "description": desc,
+            "source_finding": source_finding,
+            "priority": priority,
+            "scope": "ext",
+            "status": "pending",
+            "datetime": datetime.now(timezone.utc).isoformat(),
+            "metadata": metadata or {},
+        })
+
+    _api_urls: set = set()
+    _webview_urls: set = set()
+
+    # Scan string_findings.txt for URLs and API endpoints
+    sf_path = project_dir / "string_findings.txt"
+    if sf_path.exists():
+        try:
+            sf_text = sf_path.read_text(encoding="utf-8", errors="ignore")
+            for url_m in re.finditer(r'https?://[^\s"\'<>\]]{10,}', sf_text):
+                url = url_m.group(0).rstrip(".,;)")
+                try:
+                    from urllib.parse import urlparse
+                    host = urlparse(url).hostname or ""
+                except Exception:
+                    continue
+                if not host or host in ("localhost", "127.0.0.1"):
+                    continue
+                if any(kw in url.lower() for kw in
+                       ("/api/", "/v1/", "/v2/", "/v3/", "/graphql", "/rest/")):
+                    _api_urls.add(url)
+                else:
+                    _webview_urls.add(url)
+        except Exception:
+            pass
+
+    # API URLs → Siphon
+    _api_hosts: set = set()
+    for url in list(_api_urls)[:20]:
+        try:
+            from urllib.parse import urlparse
+            host = urlparse(url).hostname or ""
+        except Exception:
+            continue
+        if host in _api_hosts:
+            continue
+        _api_hosts.add(host)
+        _add("api", "Siphon", url, f"API endpoint from mobile app: {host}",
+             f"Quill extracted API endpoint {url} from the mobile application. "
+             f"Siphon can test this API for authentication, authorization, "
+             f"injection, and data exposure vulnerabilities.",
+             priority="HIGH", source_finding="Mobile app API endpoint")
+
+    # WebView URLs → Fracture
+    _web_hosts: set = set()
+    for url in list(_webview_urls)[:20]:
+        try:
+            from urllib.parse import urlparse
+            host = urlparse(url).hostname or ""
+        except Exception:
+            continue
+        if host in _web_hosts or host in _api_hosts:
+            continue
+        _web_hosts.add(host)
+        _add("web_app", "Fracture", url, f"Web target from mobile app: {host}",
+             f"Quill extracted URL {url} from the mobile application. "
+             f"Fracture can test this web target for vulnerabilities.",
+             priority="MEDIUM", source_finding="Mobile app embedded URL")
+
+    # Findings-based action items
+    for f in findings:
+        title_l = (f.get("title") or "").lower()
+        data = f.get("data") or {}
+
+        # Cloud credentials → Forge
+        if any(kw in title_l for kw in _CLOUD_PATTERNS):
+            _add("cloud_audit", "Forge",
+                 data.get("affected", "mobile app"),
+                 f"Cloud credential from mobile app",
+                 f"Quill found {f.get('title', 'a cloud credential')} in the mobile "
+                 f"application. Forge can audit the associated cloud environment "
+                 f"for misconfigurations and exposed resources.",
+                 priority="CRITICAL",
+                 source_finding=f.get("title", ""))
+
+        # API keys → Siphon
+        if any(kw in title_l for kw in _API_PATTERNS):
+            _add("api", "Siphon",
+                 data.get("affected", "mobile app"),
+                 f"API credential from mobile app",
+                 f"Quill found {f.get('title', 'an API credential')} in the mobile "
+                 f"application. Siphon can use discovered credentials to test "
+                 f"API endpoints for authorization flaws.",
+                 priority="HIGH",
+                 source_finding=f.get("title", ""))
+
+        # Private keys / certs → Isotope
+        if "private key" in title_l or "certificate" in title_l:
+            _add("file_analysis", "Isotope",
+                 data.get("affected", "mobile app"),
+                 f"Certificate/key from mobile app",
+                 f"Quill found {f.get('title', 'embedded key material')} in the mobile "
+                 f"application. Isotope can perform deeper certificate chain "
+                 f"analysis and extract additional metadata.",
+                 priority="HIGH",
+                 source_finding=f.get("title", ""))
+
+    if not items:
+        return
+    ai_path = project_dir / "action_items.json"
+    try:
+        existing = json.loads(ai_path.read_text(encoding="utf-8")) if ai_path.exists() else []
+    except Exception:
+        existing = []
+    existing.extend(items)
+    ai_path.write_text(json.dumps(existing, indent=2, default=str), encoding="utf-8")
+    log(f"[cross-tool] {len(items)} action item(s) generated")
 
 
 if __name__ == "__main__":
