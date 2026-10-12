@@ -48,15 +48,40 @@ try:
 except ImportError:
     _el = None
 
+try:
+    from pr0t31n_pause import PauseManager as _PP
+except ImportError:
+    _PP = None
+
 _MANAGED = os.environ.get("QUILL_MANAGED", "") == "1"
 _findings: list = []
 
 _RUN_DIR: Optional[Path] = None
 _RUNLOG = None
+_pause = None
 
 _CSV_FIELDS = ["id", "tool", "title", "datetime", "ip", "port", "hostname",
                "risk", "command", "description", "output_file", "affected",
                "cves", "service", "catalogue_id", "remediation", "sources"]
+
+
+def _check_pause():
+    if _pause is not None and _pause.check_and_pause():
+        sys.exit(42)
+
+
+def _save_checkpoint():
+    if _RUN_DIR is None:
+        return
+    try:
+        cp = {
+            "findings_count": len(_findings),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        (_RUN_DIR / "checkpoint.json").write_text(
+            json.dumps(cp, indent=2), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _rel(p) -> str:
@@ -144,6 +169,7 @@ def finding(*, title: str, severity: str, description: str,
 # ── IPA extraction ────────────────────────────────────────────────────────────
 
 def extract_ipa(ipa_path: Path, dest: Path) -> Optional[Path]:
+    _check_pause()
     status("extract", "IPA extraction", "running")
     if not ipa_path.exists():
         err(f"IPA not found: {ipa_path}")
@@ -173,6 +199,8 @@ def extract_ipa(ipa_path: Path, dest: Path) -> Optional[Path]:
 
 
 def analyse_info_plist(app_dir: Path, output_dir: Path) -> dict:
+    _check_pause()
+    _save_checkpoint()
     status("info_plist", "Info.plist analysis", "running")
     plist_path = app_dir / "Info.plist"
     out_file = output_dir / "info_plist.json"
@@ -239,6 +267,8 @@ def analyse_info_plist(app_dir: Path, output_dir: Path) -> dict:
 
 
 def analyse_entitlements(app_dir: Path, output_dir: Path) -> None:
+    _check_pause()
+    _save_checkpoint()
     status("entitlements", "Entitlements extraction", "running")
     codesign = shutil.which("codesign")
     if not codesign:
@@ -293,6 +323,8 @@ _HARDCODED_PATTERNS = [
 
 
 def analyse_strings(app_dir: Path, output_dir: Path) -> None:
+    _check_pause()
+    _save_checkpoint()
     status("strings", "Hard-coded secret scan", "running")
     strings_bin = shutil.which("strings")
     out_file = output_dir / "string_findings.txt"
@@ -326,6 +358,7 @@ def analyse_strings(app_dir: Path, output_dir: Path) -> None:
         except Exception:
             pass
 
+    _check_pause()
     for ext in ("plist", "json", "strings", "txt"):
         for p in app_dir.rglob(f"*.{ext}"):
             try:
@@ -357,6 +390,7 @@ def analyse_strings(app_dir: Path, output_dir: Path) -> None:
 # ── APK extraction ────────────────────────────────────────────────────────────
 
 def extract_apk(apk_path: Path, dest: Path) -> Optional[Path]:
+    _check_pause()
     status("extract", "APK extraction", "running")
     if not apk_path.exists():
         err(f"APK not found: {apk_path}")
@@ -375,6 +409,7 @@ def extract_apk(apk_path: Path, dest: Path) -> Optional[Path]:
         apktool = shutil.which("apktool")
         if apktool:
             log("Binary XML detected — running apktool decode")
+            _save_checkpoint()
             try:
                 decoded = dest / "decoded"
                 if _ur is not None:
@@ -386,6 +421,7 @@ def extract_apk(apk_path: Path, dest: Path) -> Optional[Path]:
                 else:
                     subprocess.run([apktool, "d", "-f", "-o", str(decoded), str(apk_path)],
                                     capture_output=True, text=True, timeout=300)
+                _check_pause()
                 if (decoded / "AndroidManifest.xml").exists():
                     status("extract", "APK extraction", "complete")
                     return decoded
@@ -426,6 +462,8 @@ def _attr(el, name: str) -> str:
 
 
 def analyse_manifest(app_dir: Path, output_dir: Path) -> dict:
+    _check_pause()
+    _save_checkpoint()
     status("manifest", "AndroidManifest.xml analysis", "running")
     manifest_path = app_dir / "AndroidManifest.xml"
     out_file = output_dir / "manifest_analysis.json"
@@ -551,6 +589,7 @@ def analyse_manifest(app_dir: Path, output_dir: Path) -> dict:
 
 
 def analyse_permissions(app_dir: Path, output_dir: Path, manifest_data: dict) -> None:
+    _check_pause()
     status("permissions", "Permission analysis", "running")
     perms = manifest_data.get("permissions", [])
     package = manifest_data.get("package", "")
@@ -593,6 +632,8 @@ def analyse_permissions(app_dir: Path, output_dir: Path, manifest_data: dict) ->
 
 
 def analyse_strings_apk(app_dir: Path, output_dir: Path) -> None:
+    _check_pause()
+    _save_checkpoint()
     status("strings_apk", "APK hard-coded secret scan", "running")
     strings_bin = shutil.which("strings")
     out_file = output_dir / "string_findings.txt"
@@ -606,6 +647,7 @@ def analyse_strings_apk(app_dir: Path, output_dir: Path) -> None:
 
     # Scan DEX files
     for dex in app_dir.rglob("*.dex"):
+        _check_pause()
         if strings_bin:
             try:
                 strings_raw = output_dir / f"strings_{dex.name}.txt"
@@ -623,6 +665,7 @@ def analyse_strings_apk(app_dir: Path, output_dir: Path) -> None:
             except Exception:
                 pass
 
+    _check_pause()
     # Scan smali files (if apktool decoded)
     for smali in app_dir.rglob("*.smali"):
         try:
@@ -837,6 +880,8 @@ if (ObjC.available) {
 
 
 def dynamic_analysis(target: str, platform: str, device: str, output_dir: Path) -> None:
+    _check_pause()
+    _save_checkpoint()
     status("dynamic", "Dynamic analysis", "running")
 
     frida_bin = shutil.which("frida")
@@ -866,6 +911,7 @@ def dynamic_analysis(target: str, platform: str, device: str, output_dir: Path) 
         ]
 
     for check_id, label, script_code, catalogue_id in checks:
+        _check_pause()
         status("dynamic", f"Dynamic: {label}", "running")
         script_file = scripts_dir / f"{check_id}.js"
         result_file = results_dir / f"{check_id}.json"
@@ -942,6 +988,8 @@ def _detect_platform(file_path: str) -> str:
 
 
 def main() -> int:
+    global _pause
+
     p = argparse.ArgumentParser(prog="quill",
                                   description="Quill — Mobile application security analysis tool")
     p.add_argument("--app", help="Path to .ipa or .apk file")
@@ -993,6 +1041,13 @@ def main() -> int:
         except Exception:
             _RUNLOG = None
 
+    if _PP is not None:
+        _pause = _PP(project_dir, "quill")
+        _pause.start_watcher(
+            checkpoint_callback=_save_checkpoint,
+            grace_period=30,
+        )
+
     if _us is not None:
         _us.write_meta(project_dir, _us.make_meta(
             tool="quill", version=VERSION,
@@ -1005,21 +1060,29 @@ def main() -> int:
     started_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     extract_dir = project_dir / "extract"
 
+    _check_pause()
     if platform == "ios":
         app_dir = extract_ipa(Path(app_path), extract_dir)
         if not app_dir:
             return 1
+        _check_pause()
         analyse_info_plist(app_dir, project_dir)
+        _check_pause()
         analyse_entitlements(app_dir, project_dir)
+        _check_pause()
         analyse_strings(app_dir, project_dir)
     elif platform == "android":
         app_dir = extract_apk(Path(app_path), extract_dir)
         if not app_dir:
             return 1
+        _check_pause()
         manifest_data = analyse_manifest(app_dir, project_dir)
+        _check_pause()
         analyse_permissions(app_dir, project_dir, manifest_data)
+        _check_pause()
         analyse_strings_apk(app_dir, project_dir)
 
+    _check_pause()
     if args.dynamic:
         target_process = args.target_process
         if not target_process:
@@ -1061,6 +1124,8 @@ def main() -> int:
         _write_findings_csv(project_dir / "findings.csv", _findings)
 
     _generate_cross_tool_action_items(project_dir)
+    if _pause is not None:
+        _pause.write_stop_reason("completed", "all_phases_done")
     log(f"Quill complete — {len(_findings)} finding(s) — output: {project_dir}")
     return 0
 
