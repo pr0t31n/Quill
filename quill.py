@@ -80,6 +80,7 @@ def _save_checkpoint():
         }
         (_RUN_DIR / "checkpoint.json").write_text(
             json.dumps(cp, indent=2), encoding="utf-8")
+        log(f"[checkpoint] Saved — {len(_findings)} finding(s)")
     except Exception:
         pass
 
@@ -106,11 +107,15 @@ def _analysis_log(out_file, title: str, lines: list) -> None:
         pass
 
 
+def _ts() -> str:
+    return datetime.now().strftime("%H:%M:%S")
+
+
 def _tok(token: str, msg: str) -> None:
     if _MANAGED:
-        print(f"{token}:{msg}", flush=True)
+        print(f"{token}:[{datetime.now().isoformat()}] {msg}", flush=True)
     else:
-        print(msg, flush=True)
+        print(f"[{_ts()}] {msg}", flush=True)
 
 
 def log(msg: str) -> None:
@@ -129,7 +134,8 @@ def err(msg: str) -> None:
 
 def status(phase: str, label: str, state: str, step: str = "") -> None:
     _tok("__VANTAGE_STATUS__",
-         json.dumps({"phase": phase, "label": label, "state": state, "step": step}))
+         json.dumps({"phase": phase, "label": label, "state": state, "step": step,
+                     "ts": datetime.now().isoformat()}))
 
 
 def finding(*, title: str, severity: str, description: str,
@@ -163,6 +169,7 @@ def finding(*, title: str, severity: str, description: str,
             "data": data or {},
         }
     _findings.append(rec)
+    log(f"[finding] #{len(_findings)} [{severity.upper()}] {title}")
     _tok("__VANTAGE_FINDING__", json.dumps(rec))
 
 
@@ -170,14 +177,19 @@ def finding(*, title: str, severity: str, description: str,
 
 def extract_ipa(ipa_path: Path, dest: Path) -> Optional[Path]:
     _check_pause()
+    log(f"[extract] Extracting IPA archive: {ipa_path}")
     status("extract", "IPA extraction", "running")
     if not ipa_path.exists():
         err(f"IPA not found: {ipa_path}")
         status("extract", "IPA extraction", "error")
         return None
+    ipa_size = ipa_path.stat().st_size
+    log(f"[extract] IPA size: {ipa_size / 1048576:.1f} MB")
     dest.mkdir(parents=True, exist_ok=True)
     try:
         with zipfile.ZipFile(ipa_path, "r") as z:
+            members = z.namelist()
+            log(f"[extract] Archive contains {len(members)} entries — extracting to {dest}")
             z.extractall(dest)
     except zipfile.BadZipFile as exc:
         err(f"Invalid IPA archive: {exc}")
@@ -194,6 +206,7 @@ def extract_ipa(ipa_path: Path, dest: Path) -> Optional[Path]:
         err("No .app bundle found in Payload/")
         status("extract", "IPA extraction", "error")
         return None
+    log(f"[extract] IPA extraction complete — app bundle: {apps[0].name}")
     status("extract", "IPA extraction", "complete")
     return apps[0]
 
@@ -201,6 +214,7 @@ def extract_ipa(ipa_path: Path, dest: Path) -> Optional[Path]:
 def analyse_info_plist(app_dir: Path, output_dir: Path) -> dict:
     _check_pause()
     _save_checkpoint()
+    log(f"[info_plist] Starting Info.plist analysis for {app_dir.name}...")
     status("info_plist", "Info.plist analysis", "running")
     plist_path = app_dir / "Info.plist"
     out_file = output_dir / "info_plist.json"
@@ -208,6 +222,7 @@ def analyse_info_plist(app_dir: Path, output_dir: Path) -> dict:
         err("Info.plist missing")
         status("info_plist", "Info.plist analysis", "error")
         return {}
+    log(f"[info_plist] Parsing plist: {plist_path}")
     try:
         with open(plist_path, "rb") as f:
             data = plistlib.load(f)
@@ -216,10 +231,11 @@ def analyse_info_plist(app_dir: Path, output_dir: Path) -> dict:
         status("info_plist", "Info.plist analysis", "error")
         return {}
     out_file.write_text(json.dumps(data, default=str, indent=2), encoding="utf-8")
+    log(f"[info_plist] Plist parsed — {len(data)} top-level keys")
 
     bundle_id = data.get("CFBundleIdentifier", "")
     version = data.get("CFBundleShortVersionString", "")
-    log(f"Bundle: {bundle_id} v{version}")
+    log(f"[info_plist] Bundle: {bundle_id} v{version}")
     _analysis_log(out_file, "Info.plist analysis",
                   [f"source: {plist_path}",
                    f"bundle: {bundle_id} v{version}",
@@ -227,7 +243,9 @@ def analyse_info_plist(app_dir: Path, output_dir: Path) -> dict:
                    "custom URL schemes, background modes"])
 
     ats = data.get("NSAppTransportSecurity") or {}
+    log(f"[info_plist] Checking App Transport Security — ATS config present: {bool(ats)}")
     if ats.get("NSAllowsArbitraryLoads"):
+        log("[info_plist] ATS: NSAllowsArbitraryLoads=true — finding emitted")
         finding(title="App Transport Security: arbitrary loads allowed",
                  severity="HIGH",
                  description=("NSAllowsArbitraryLoads=true disables ATS globally; "
@@ -236,8 +254,12 @@ def analyse_info_plist(app_dir: Path, output_dir: Path) -> dict:
                        "affected": bundle_id,
                        "remediation": "Remove NSAllowsArbitraryLoads or restrict to specific domains."},
                  output_file=str(out_file))
-    for dom, cfg in (ats.get("NSExceptionDomains") or {}).items():
+    exc_domains = ats.get("NSExceptionDomains") or {}
+    if exc_domains:
+        log(f"[info_plist] ATS: {len(exc_domains)} exception domain(s) configured")
+    for dom, cfg in exc_domains.items():
         if cfg.get("NSExceptionAllowsInsecureHTTPLoads"):
+            log(f"[info_plist] ATS: HTTP exception for domain {dom} — finding emitted")
             finding(title=f"ATS exception allows HTTP for {dom}",
                      severity="MEDIUM",
                      description=("Per-domain exception allows cleartext HTTP."),
@@ -246,6 +268,7 @@ def analyse_info_plist(app_dir: Path, output_dir: Path) -> dict:
                      output_file=str(out_file))
 
     schemes = data.get("CFBundleURLTypes") or []
+    log(f"[info_plist] Checking URL schemes — {len(schemes)} bundle URL type(s)")
     for entry in schemes:
         for sch in entry.get("CFBundleURLSchemes") or []:
             log(f"URL scheme: {sch}://")
@@ -260,8 +283,12 @@ def analyse_info_plist(app_dir: Path, output_dir: Path) -> dict:
                            "affected": f"{bundle_id} / {sch}"},
                      output_file=str(out_file))
 
-    if "background-fetch" in (data.get("UIBackgroundModes") or []):
-        log("Background fetch enabled")
+    bg_modes = data.get("UIBackgroundModes") or []
+    if bg_modes:
+        log(f"[info_plist] Background modes: {', '.join(bg_modes)}")
+    if "background-fetch" in bg_modes:
+        log("[info_plist] Background fetch enabled")
+    log(f"[info_plist] Info.plist analysis complete — bundle {bundle_id}")
     status("info_plist", "Info.plist analysis", "complete")
     return data
 
@@ -269,12 +296,14 @@ def analyse_info_plist(app_dir: Path, output_dir: Path) -> dict:
 def analyse_entitlements(app_dir: Path, output_dir: Path) -> None:
     _check_pause()
     _save_checkpoint()
+    log(f"[entitlements] Starting entitlements extraction for {app_dir.name}...")
     status("entitlements", "Entitlements extraction", "running")
     codesign = shutil.which("codesign")
     if not codesign:
-        log("codesign not available — skipping entitlements (macOS-only tool)")
+        log("[entitlements] codesign not available — skipping entitlements (macOS-only tool)")
         status("entitlements", "Entitlements extraction", "skipped")
         return
+    log(f"[entitlements] Using codesign: {codesign}")
     out_file = output_dir / "entitlements.xml"
     try:
         if _ur is not None:
@@ -289,7 +318,10 @@ def analyse_entitlements(app_dir: Path, output_dir: Path) -> None:
                 capture_output=True, text=True, timeout=60)
         ent = cp.stdout or ""
         out_file.write_text(ent, encoding="utf-8")
+        log(f"[entitlements] Extracted {len(ent)} bytes of entitlement data")
+        log("[entitlements] Checking get-task-allow (debuggable)...")
         if "get-task-allow" in ent and "<true/>" in ent.split("get-task-allow")[-1][:60]:
+            log("[entitlements] get-task-allow=true detected — finding emitted")
             finding(title="get-task-allow enabled (debuggable binary)",
                      severity="HIGH",
                      description=("get-task-allow=true permits attaching a debugger; "
@@ -297,7 +329,9 @@ def analyse_entitlements(app_dir: Path, output_dir: Path) -> None:
                      data={"catalogue_id": "QUILL-IOS-020",
                            "remediation": "Set get-task-allow=false in entitlements before App Store submission."},
                      output_file=str(out_file))
+        log("[entitlements] Checking application-identifier for wildcards...")
         if "application-identifier" in ent and "wildcard" in ent.lower():
+            log("[entitlements] Wildcard application-identifier detected — finding emitted")
             finding(title="Wildcard application-identifier in entitlements",
                      severity="MEDIUM",
                      description=("Wildcard provisioning profile in use; key-chain "
@@ -306,6 +340,7 @@ def analyse_entitlements(app_dir: Path, output_dir: Path) -> None:
                      output_file=str(out_file))
     except Exception as exc:
         err(f"codesign error: {exc}")
+    log(f"[entitlements] Entitlements extraction complete")
     status("entitlements", "Entitlements extraction", "complete")
 
 
@@ -325,15 +360,20 @@ _HARDCODED_PATTERNS = [
 def analyse_strings(app_dir: Path, output_dir: Path) -> None:
     _check_pause()
     _save_checkpoint()
+    log(f"[strings] Starting hard-coded secret scan on {app_dir.name}...")
     status("strings", "Hard-coded secret scan", "running")
     strings_bin = shutil.which("strings")
+    log(f"[strings] strings binary: {strings_bin or 'not found'}")
+    log(f"[strings] Scanning {len(_HARDCODED_PATTERNS)} secret patterns (AWS, Google, Slack, Stripe, keys, JWT, creds...)")
     out_file = output_dir / "string_findings.txt"
     out_file.write_text("", encoding="utf-8")
 
     app_name = app_dir.name.replace(".app", "")
     binary = app_dir / app_name
     if not binary.exists():
-        log(f"Main binary not found at {binary} — scanning entire bundle")
+        log(f"[strings] Main binary not found at {binary} — scanning entire bundle")
+    else:
+        log(f"[strings] Main binary located: {binary}")
 
     hits: list = []
     def _scan(text: str, source: str) -> None:
@@ -343,6 +383,7 @@ def analyse_strings(app_dir: Path, output_dir: Path) -> None:
 
     strings_raw = output_dir / "strings_raw.txt"
     if binary.exists() and strings_bin:
+        log(f"[strings] Running strings on main binary...")
         try:
             if _ur is not None:
                 cp = _ur.run_tool([strings_bin, str(binary)],
@@ -355,16 +396,21 @@ def analyse_strings(app_dir: Path, output_dir: Path) -> None:
                                       capture_output=True, text=True, timeout=120)
             strings_raw.write_text(cp.stdout or "", encoding="utf-8")
             _scan(cp.stdout or "", str(binary))
+            log(f"[strings] Binary strings extracted — {len((cp.stdout or '').splitlines())} lines")
         except Exception:
             pass
 
     _check_pause()
+    log("[strings] Scanning resource files (plist, json, strings, txt)...")
+    _resource_count = 0
     for ext in ("plist", "json", "strings", "txt"):
         for p in app_dir.rglob(f"*.{ext}"):
+            _resource_count += 1
             try:
                 _scan(p.read_text(encoding="utf-8", errors="ignore")[:200000], str(p))
             except Exception:
                 continue
+    log(f"[strings] Scanned {_resource_count} resource files")
 
     _analysis_log(out_file, "Hard-coded secret scan",
                   [f"strings_binary: {strings_bin}",
@@ -372,6 +418,7 @@ def analyse_strings(app_dir: Path, output_dir: Path) -> None:
                    "scanned_exts: plist, json, strings, txt",
                    f"pattern_hits: {len(hits)}"])
     if hits:
+        log(f"[strings] {len(hits)} potential secret(s) found — writing findings (capped at 30)")
         out_file.write_text(
             "\n".join(f"[{label}] {match} (in {source})" for label, match, source in hits),
             encoding="utf-8")
@@ -384,6 +431,9 @@ def analyse_strings(app_dir: Path, output_dir: Path) -> None:
                            "affected": source,
                            "evidence": match[:80]},
                      output_file=str(out_file))
+    else:
+        log("[strings] No hard-coded secrets detected in IPA bundle")
+    log("[strings] Hard-coded secret scan complete")
     status("strings", "Hard-coded secret scan", "complete")
 
 
@@ -391,14 +441,19 @@ def analyse_strings(app_dir: Path, output_dir: Path) -> None:
 
 def extract_apk(apk_path: Path, dest: Path) -> Optional[Path]:
     _check_pause()
+    log(f"[extract] Extracting APK archive: {apk_path}")
     status("extract", "APK extraction", "running")
     if not apk_path.exists():
         err(f"APK not found: {apk_path}")
         status("extract", "APK extraction", "error")
         return None
+    apk_size = apk_path.stat().st_size
+    log(f"[extract] APK size: {apk_size / 1048576:.1f} MB")
     dest.mkdir(parents=True, exist_ok=True)
     try:
         with zipfile.ZipFile(apk_path, "r") as z:
+            members = z.namelist()
+            log(f"[extract] Archive contains {len(members)} entries — extracting to {dest}")
             z.extractall(dest)
     except zipfile.BadZipFile as exc:
         err(f"Invalid APK archive: {exc}")
@@ -406,9 +461,10 @@ def extract_apk(apk_path: Path, dest: Path) -> Optional[Path]:
         return None
 
     if not (dest / "AndroidManifest.xml").exists() and not (dest / "classes.dex").exists():
+        log("[extract] Standard manifest/dex not found — binary XML suspected")
         apktool = shutil.which("apktool")
         if apktool:
-            log("Binary XML detected — running apktool decode")
+            log(f"[extract] Binary XML detected — running apktool decode ({apktool})")
             _save_checkpoint()
             try:
                 decoded = dest / "decoded"
@@ -423,13 +479,17 @@ def extract_apk(apk_path: Path, dest: Path) -> Optional[Path]:
                                     capture_output=True, text=True, timeout=300)
                 _check_pause()
                 if (decoded / "AndroidManifest.xml").exists():
+                    log(f"[extract] apktool decode successful — decoded manifest at {decoded}")
                     status("extract", "APK extraction", "complete")
                     return decoded
             except Exception as exc:
                 err(f"apktool error: {exc}")
         else:
-            log("apktool not available — raw ZIP extraction only (binary XML not decoded)")
+            log("[extract] apktool not available — raw ZIP extraction only (binary XML not decoded)")
+    else:
+        log("[extract] Standard APK layout confirmed (manifest and/or dex present)")
 
+    log(f"[extract] APK extraction complete — root: {dest}")
     status("extract", "APK extraction", "complete")
     return dest
 
@@ -464,6 +524,7 @@ def _attr(el, name: str) -> str:
 def analyse_manifest(app_dir: Path, output_dir: Path) -> dict:
     _check_pause()
     _save_checkpoint()
+    log(f"[manifest] Starting AndroidManifest.xml analysis for {app_dir.name}...")
     status("manifest", "AndroidManifest.xml analysis", "running")
     manifest_path = app_dir / "AndroidManifest.xml"
     out_file = output_dir / "manifest_analysis.json"
@@ -479,6 +540,7 @@ def analyse_manifest(app_dir: Path, output_dir: Path) -> dict:
         err(f"AndroidManifest.xml read error: {exc}")
         status("manifest", "AndroidManifest.xml analysis", "error")
         return {}
+    log(f"[manifest] Manifest loaded — {len(raw)} bytes")
 
     try:
         tree = ET.parse(manifest_path)
@@ -489,16 +551,19 @@ def analyse_manifest(app_dir: Path, output_dir: Path) -> dict:
         return {}
 
     package = root.get("package", "")
-    log(f"Package: {package}")
+    log(f"[manifest] Package: {package}")
 
     app_el = root.find("application")
     result = {"package": package, "permissions": [], "components": [], "flags": {}}
 
     if app_el is not None:
+        log("[manifest] Checking application security flags...")
         debuggable = _attr(app_el, "debuggable").lower() == "true"
         allow_backup = _attr(app_el, "allowBackup").lower() != "false"
         use_cleartext = _attr(app_el, "usesCleartextTraffic").lower() == "true"
         network_config = _attr(app_el, "networkSecurityConfig")
+        log(f"[manifest] Flags — debuggable={debuggable}, allowBackup={allow_backup}, "
+            f"usesCleartextTraffic={use_cleartext}, networkSecurityConfig={bool(network_config)}")
 
         result["flags"] = {
             "debuggable": debuggable,
@@ -508,6 +573,7 @@ def analyse_manifest(app_dir: Path, output_dir: Path) -> dict:
         }
 
         if debuggable:
+            log("[manifest] android:debuggable=true — finding emitted")
             finding(title="Application is debuggable",
                      severity="HIGH",
                      description="android:debuggable=true allows attaching a debugger to the running app, "
@@ -526,6 +592,7 @@ def analyse_manifest(app_dir: Path, output_dir: Path) -> dict:
                      output_file=str(out_file))
 
         if use_cleartext:
+            log("[manifest] usesCleartextTraffic=true — finding emitted")
             finding(title="Cleartext traffic allowed",
                      severity="HIGH",
                      description="android:usesCleartextTraffic=true allows unencrypted HTTP connections globally.",
@@ -533,6 +600,8 @@ def analyse_manifest(app_dir: Path, output_dir: Path) -> dict:
                            "remediation": "Set usesCleartextTraffic=false and use a network security config for exceptions."},
                      output_file=str(out_file))
 
+        log("[manifest] Enumerating exported components...")
+        _exported_count = 0
         for comp_type in ("activity", "service", "receiver", "provider"):
             for comp in app_el.findall(comp_type):
                 name = _attr(comp, "name")
@@ -545,6 +614,8 @@ def analyse_manifest(app_dir: Path, output_dir: Path) -> dict:
                     "exported": is_exported, "permission": perm,
                     "has_intent_filter": has_intent_filter,
                 })
+                if is_exported:
+                    _exported_count += 1
                 if is_exported and not perm:
                     if name and not name.endswith(".MainActivity"):
                         finding(title=f"Exported {comp_type} without permission: {name}",
@@ -555,10 +626,13 @@ def analyse_manifest(app_dir: Path, output_dir: Path) -> dict:
                                        "remediation": f"Set android:exported=false or add a permission attribute to {name}."},
                                  output_file=str(out_file))
 
+    log(f"[manifest] Components scanned — {len(result['components'])} total, {_exported_count} exported")
+
     sdk_el = root.find("uses-sdk")
     if sdk_el is not None:
         min_sdk = _attr(sdk_el, "minSdkVersion")
         target_sdk = _attr(sdk_el, "targetSdkVersion")
+        log(f"[manifest] SDK versions — minSdk={min_sdk}, targetSdk={target_sdk}")
         result["flags"]["minSdkVersion"] = min_sdk
         result["flags"]["targetSdkVersion"] = target_sdk
         if min_sdk and int(min_sdk) < 24:
@@ -575,6 +649,7 @@ def analyse_manifest(app_dir: Path, output_dir: Path) -> dict:
         if perm_name:
             perms.append(perm_name)
     result["permissions"] = perms
+    log(f"[manifest] {len(perms)} permission(s) declared")
 
     out_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
     _analysis_log(out_file, "AndroidManifest.xml analysis",
@@ -584,12 +659,14 @@ def analyse_manifest(app_dir: Path, output_dir: Path) -> dict:
                    f"debuggable: {result['flags'].get('debuggable')}",
                    f"allowBackup: {result['flags'].get('allowBackup')}"])
 
+    log(f"[manifest] AndroidManifest.xml analysis complete — {package}")
     status("manifest", "AndroidManifest.xml analysis", "complete")
     return result
 
 
 def analyse_permissions(app_dir: Path, output_dir: Path, manifest_data: dict) -> None:
     _check_pause()
+    log(f"[permissions] Starting permission analysis...")
     status("permissions", "Permission analysis", "running")
     perms = manifest_data.get("permissions", [])
     package = manifest_data.get("package", "")
@@ -597,6 +674,7 @@ def analyse_permissions(app_dir: Path, output_dir: Path, manifest_data: dict) ->
 
     dangerous = [p for p in perms if p in _ANDROID_DANGEROUS_PERMS]
     normal = [p for p in perms if p not in _ANDROID_DANGEROUS_PERMS]
+    log(f"[permissions] {len(perms)} total — {len(dangerous)} dangerous, {len(normal)} normal")
 
     result = {
         "total": len(perms),
@@ -611,6 +689,7 @@ def analyse_permissions(app_dir: Path, output_dir: Path, manifest_data: dict) ->
                    f"dangerous_permissions: {len(dangerous)}"])
 
     if len(dangerous) > 10:
+        log(f"[permissions] Excessive dangerous permissions ({len(dangerous)} > 10) — finding emitted")
         finding(title=f"Excessive dangerous permissions ({len(dangerous)})",
                  severity="MEDIUM",
                  description=f"The application requests {len(dangerous)} dangerous permissions. "
@@ -620,6 +699,7 @@ def analyse_permissions(app_dir: Path, output_dir: Path, manifest_data: dict) ->
                        "remediation": "Review and remove unnecessary dangerous permissions."},
                  output_file=str(out_file))
 
+    log(f"[permissions] Emitting individual findings for {len(dangerous)} dangerous permission(s)")
     for perm in dangerous:
         short = perm.rsplit(".", 1)[-1]
         finding(title=f"Dangerous permission: {short}",
@@ -628,14 +708,18 @@ def analyse_permissions(app_dir: Path, output_dir: Path, manifest_data: dict) ->
                  data={"catalogue_id": "QUILL-APK-031", "affected": f"{package} / {short}"},
                  output_file=str(out_file))
 
+    log("[permissions] Permission analysis complete")
     status("permissions", "Permission analysis", "complete")
 
 
 def analyse_strings_apk(app_dir: Path, output_dir: Path) -> None:
     _check_pause()
     _save_checkpoint()
+    log(f"[strings_apk] Starting APK hard-coded secret scan on {app_dir.name}...")
     status("strings_apk", "APK hard-coded secret scan", "running")
     strings_bin = shutil.which("strings")
+    log(f"[strings_apk] strings binary: {strings_bin or 'not found'}")
+    log(f"[strings_apk] Scanning {len(_HARDCODED_PATTERNS)} secret patterns (AWS, Google, Slack, Stripe, keys, JWT, creds...)")
     out_file = output_dir / "string_findings.txt"
     out_file.write_text("", encoding="utf-8")
 
@@ -646,7 +730,9 @@ def analyse_strings_apk(app_dir: Path, output_dir: Path) -> None:
                 hits.append((label, m.group(0)[:80], source))
 
     # Scan DEX files
-    for dex in app_dir.rglob("*.dex"):
+    _dex_files = list(app_dir.rglob("*.dex"))
+    log(f"[strings_apk] Found {len(_dex_files)} DEX file(s) to scan")
+    for dex in _dex_files:
         _check_pause()
         if strings_bin:
             try:
@@ -667,19 +753,26 @@ def analyse_strings_apk(app_dir: Path, output_dir: Path) -> None:
 
     _check_pause()
     # Scan smali files (if apktool decoded)
-    for smali in app_dir.rglob("*.smali"):
+    _smali_files = list(app_dir.rglob("*.smali"))
+    if _smali_files:
+        log(f"[strings_apk] Scanning {len(_smali_files)} smali file(s) (apktool decoded)")
+    for smali in _smali_files:
         try:
             _scan(smali.read_text(encoding="utf-8", errors="ignore")[:200000], str(smali))
         except Exception:
             continue
 
     # Scan resource/config files
+    log("[strings_apk] Scanning resource/config files (xml, json, properties, txt, cfg, yml, yaml)...")
+    _res_count = 0
     for ext in ("xml", "json", "properties", "txt", "cfg", "yml", "yaml"):
         for p in app_dir.rglob(f"*.{ext}"):
+            _res_count += 1
             try:
                 _scan(p.read_text(encoding="utf-8", errors="ignore")[:200000], str(p))
             except Exception:
                 continue
+    log(f"[strings_apk] Scanned {_res_count} resource/config files")
 
     _analysis_log(out_file, "APK hard-coded secret scan",
                   [f"strings_binary: {strings_bin}",
@@ -687,6 +780,7 @@ def analyse_strings_apk(app_dir: Path, output_dir: Path) -> None:
                    f"pattern_hits: {len(hits)}"])
 
     if hits:
+        log(f"[strings_apk] {len(hits)} potential secret(s) found — writing findings (capped at 30)")
         out_file.write_text(
             "\n".join(f"[{label}] {match} (in {source})" for label, match, source in hits),
             encoding="utf-8")
@@ -699,7 +793,10 @@ def analyse_strings_apk(app_dir: Path, output_dir: Path) -> None:
                            "affected": source,
                            "evidence": match[:80]},
                      output_file=str(out_file))
+    else:
+        log("[strings_apk] No hard-coded secrets detected in APK bundle")
 
+    log("[strings_apk] APK hard-coded secret scan complete")
     status("strings_apk", "APK hard-coded secret scan", "complete")
 
 
@@ -882,6 +979,7 @@ if (ObjC.available) {
 def dynamic_analysis(target: str, platform: str, device: str, output_dir: Path) -> None:
     _check_pause()
     _save_checkpoint()
+    log(f"[dynamic] Starting Frida dynamic analysis — target={target}, platform={platform}, device={device or 'local'}")
     status("dynamic", "Dynamic analysis", "running")
 
     frida_bin = shutil.which("frida")
@@ -889,6 +987,7 @@ def dynamic_analysis(target: str, platform: str, device: str, output_dir: Path) 
         err("frida not available — install frida-tools for dynamic analysis")
         status("dynamic", "Dynamic analysis", "skipped")
         return
+    log(f"[dynamic] Frida binary: {frida_bin}")
 
     scripts_dir = output_dir / "frida_scripts"
     scripts_dir.mkdir(parents=True, exist_ok=True)
@@ -910,8 +1009,10 @@ def dynamic_analysis(target: str, platform: str, device: str, output_dir: Path) 
             ("keychain", "Keychain monitoring", _FRIDA_IOS_KEYCHAIN_SCRIPT, "QUILL-DYN-012"),
         ]
 
+    log(f"[dynamic] Running {len(checks)} Frida check(s) on {platform} target")
     for check_id, label, script_code, catalogue_id in checks:
         _check_pause()
+        log(f"[dynamic] Injecting Frida script: {label} ({check_id})...")
         status("dynamic", f"Dynamic: {label}", "running")
         script_file = scripts_dir / f"{check_id}.js"
         result_file = results_dir / f"{check_id}.json"
@@ -935,15 +1036,18 @@ def dynamic_analysis(target: str, platform: str, device: str, output_dir: Path) 
 
             if "bypassed" in output.lower() or "injected" in output.lower():
                 sev = "HIGH" if "ssl" in check_id or "root" in check_id or "jailbreak" in check_id else "MEDIUM"
+                log(f"[dynamic] {label} — VULNERABLE (bypass/injection successful, severity={sev})")
                 finding(title=f"Dynamic: {label} — vulnerable",
                          severity=sev,
                          description=f"Frida {label} check succeeded, indicating the app is vulnerable to {label.lower()}.",
                          data={"catalogue_id": catalogue_id, "affected": target, "command": " ".join(cmd)},
                          output_file=str(result_file))
             elif output.strip():
-                log(f"Dynamic {check_id}: output captured")
+                log(f"[dynamic] {label} — output captured ({len(output)} bytes), no bypass detected")
+            else:
+                log(f"[dynamic] {label} — no output (app may not exercise this path)")
         except subprocess.TimeoutExpired:
-            log(f"Dynamic {check_id}: timeout (30s) — app may have anti-frida protection")
+            log(f"[dynamic] {label}: timeout (30s) — app may have anti-frida protection")
             finding(title=f"Dynamic: {label} — possible anti-instrumentation",
                      severity="INFO",
                      description=f"Frida script for {label} timed out, which may indicate anti-instrumentation defenses.",
@@ -951,8 +1055,10 @@ def dynamic_analysis(target: str, platform: str, device: str, output_dir: Path) 
                      output_file=str(script_file))
         except Exception as exc:
             err(f"Dynamic {check_id} error: {exc}")
+        log(f"[dynamic] {label} check done")
         status("dynamic", f"Dynamic: {label}", "complete")
 
+    log(f"[dynamic] Dynamic analysis complete — {len(checks)} check(s) executed")
     status("dynamic", "Dynamic analysis", "complete")
 
 
@@ -1019,7 +1125,9 @@ def main() -> int:
         platform = _detect_platform(app_path)
         if not platform:
             p.error(f"Cannot detect platform from extension: {app_path} — use --platform ios|android")
-    log(f"Platform: {platform}")
+        log(f"[init] Auto-detected platform: {platform} (from file extension)")
+    else:
+        log(f"[init] Platform specified: {platform}")
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     if args.project:
@@ -1031,6 +1139,7 @@ def main() -> int:
     else:
         project_dir = Path.cwd() / f"quill_{args.client_short}_{ts}"
     project_dir.mkdir(parents=True, exist_ok=True)
+    log(f"[init] Output directory: {project_dir}")
 
     global _RUN_DIR, _RUNLOG
     _RUN_DIR = project_dir
@@ -1038,6 +1147,7 @@ def main() -> int:
         try:
             _RUNLOG = _el.EventLogger(project_dir / "scan.log",
                                        errors_path=project_dir / "errors.log")
+            log("[init] Event logger initialised (scan.log + errors.log)")
         except Exception:
             _RUNLOG = None
 
@@ -1047,6 +1157,7 @@ def main() -> int:
             checkpoint_callback=_save_checkpoint,
             grace_period=30,
         )
+        log("[init] Pause manager active (grace=30s)")
 
     if _us is not None:
         _us.write_meta(project_dir, _us.make_meta(
@@ -1055,8 +1166,10 @@ def main() -> int:
             client_name=(args.client_name or args.client_short),
             engagement_name=args.engagement_name,
             target=app_path))
+        log("[init] meta.json written (universal schema)")
 
-    log(f"Quill v{VERSION} starting — {platform.upper()}: {app_path}")
+    log(f"[init] Quill v{VERSION} starting — {platform.upper()}: {app_path}")
+    log(f"[init] Client: {args.client_short}, Engagement: {args.engagement_name}")
     started_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     extract_dir = project_dir / "extract"
 
@@ -1084,6 +1197,7 @@ def main() -> int:
 
     _check_pause()
     if args.dynamic:
+        log("[main] Dynamic analysis requested — resolving target process...")
         target_process = args.target_process
         if not target_process:
             if platform == "android":
@@ -1099,15 +1213,17 @@ def main() -> int:
                         pass
             if not target_process:
                 target_process = Path(app_path).stem
-            log(f"Dynamic target process: {target_process}")
+            log(f"[main] Dynamic target process resolved: {target_process}")
         dynamic_analysis(target_process, platform, args.device, project_dir)
 
     ended_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    log(f"[finalize] Analysis phases complete — writing output files...")
 
     if _us is not None:
         out = [_us.augment_finding(dict(f), tool="quill") for f in _findings]
         _us.atomic_write_json(project_dir / "findings.json", out)
         _write_findings_csv(project_dir / "findings.csv", out)
+        log(f"[finalize] findings.json + findings.csv written ({len(out)} findings, universal schema)")
         try:
             summary = _us.make_summary(
                 tool="quill", version=VERSION,
@@ -1116,17 +1232,22 @@ def main() -> int:
                 success=True, total_findings=len(out),
                 risk_counts=_risk_counts(out))
             _us.write_summary(project_dir, summary)
+            log(f"[finalize] summary.json written — {_risk_counts(out)}")
         except Exception as exc:
             err(f"summary.json write failed: {exc}")
     else:
         (project_dir / "findings.json").write_text(
             json.dumps(_findings, indent=2), encoding="utf-8")
         _write_findings_csv(project_dir / "findings.csv", _findings)
+        log(f"[finalize] findings.json + findings.csv written ({len(_findings)} findings, legacy format)")
 
+    log("[finalize] Generating cross-tool action items...")
     _generate_cross_tool_action_items(project_dir)
     if _pause is not None:
         _pause.write_stop_reason("completed", "all_phases_done")
-    log(f"Quill complete — {len(_findings)} finding(s) — output: {project_dir}")
+    rc = _risk_counts(_findings)
+    log(f"[shutdown] Quill v{VERSION} complete — {len(_findings)} finding(s) "
+        f"(C={rc['CRITICAL']} H={rc['HIGH']} M={rc['MEDIUM']} L={rc['LOW']} I={rc['INFO']}) — output: {project_dir}")
     return 0
 
 
@@ -1137,11 +1258,14 @@ def _generate_cross_tool_action_items(project_dir: Path) -> None:
 
     fj = project_dir / "findings.json"
     if not fj.exists():
+        log("[cross-tool] No findings.json found — skipping action item generation")
         return
     try:
         findings = json.loads(fj.read_text(encoding="utf-8"))
     except Exception:
+        log("[cross-tool] Failed to parse findings.json — skipping action items")
         return
+    log(f"[cross-tool] Analysing {len(findings)} finding(s) for cross-tool opportunities...")
 
     items: list = []
     seen: set = set()
@@ -1192,6 +1316,11 @@ def _generate_cross_tool_action_items(project_dir: Path) -> None:
                     _webview_urls.add(url)
         except Exception:
             pass
+
+    if _api_urls:
+        log(f"[cross-tool] Found {len(_api_urls)} API URL(s) in string findings")
+    if _webview_urls:
+        log(f"[cross-tool] Found {len(_webview_urls)} web URL(s) in string findings")
 
     # API URLs → Siphon
     _api_hosts: set = set()
@@ -1265,6 +1394,7 @@ def _generate_cross_tool_action_items(project_dir: Path) -> None:
                  source_finding=f.get("title", ""))
 
     if not items:
+        log("[cross-tool] No cross-tool action items generated")
         return
     ai_path = project_dir / "action_items.json"
     try:
