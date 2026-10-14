@@ -13,11 +13,32 @@ def _run(cmd, check=True):
     return subprocess.run(cmd, shell=isinstance(cmd, str), check=check)
 
 
+
+def _dpkg_installed(pkg):
+    try:
+        r = subprocess.run(["dpkg", "-s", pkg],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return r.returncode == 0
+    except FileNotFoundError:
+        return False
+
+
+def _rpm_installed(pkg):
+    try:
+        return subprocess.run(
+            ["rpm", "-q", pkg],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        ).returncode == 0
+    except FileNotFoundError:
+        return False
+
+
 def install_system_deps():
     """Ensure strings binary is present."""
     if sys.platform.startswith("linux") and shutil.which("apt-get"):
         if not shutil.which("strings"):
-            _run(["apt-get", "install", "-y", "binutils"], check=False)
+            if not _dpkg_installed("binutils"):
+                _run(["apt-get", "install", "-y", "binutils"], check=False)
 
 
 def install_pip_deps():

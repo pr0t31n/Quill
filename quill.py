@@ -1167,6 +1167,15 @@ def main() -> int:
             engagement_name=args.engagement_name,
             target=app_path))
         log("[init] meta.json written (universal schema)")
+        try:
+            import pr0t31n_dep_snapshot as _ds
+            _ds.write_snapshot(
+                project_dir, "quill", VERSION,
+                binaries=["strings", "apktool", "frida", "codesign"],
+                pip_packages=[],
+            )
+        except Exception:
+            pass
 
     log(f"[init] Quill v{VERSION} starting — {platform.upper()}: {app_path}")
     log(f"[init] Client: {args.client_short}, Engagement: {args.engagement_name}")
