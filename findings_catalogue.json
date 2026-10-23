@@ -4,12 +4,16 @@
   "entries": [
     {
       "id": "QUILL-IOS-001",
-      "title": "App Transport Security: arbitrary loads allowed",
-      "source_tools": ["quill"],
+      "title": "Mobile Security: App Transport Security: arbitrary loads allowed",
+      "source_tools": [
+        "quill"
+      ],
       "risk": "HIGH",
       "description": "NSAllowsArbitraryLoads=true disables ATS globally; non-HTTPS connections are permitted.",
       "impact": "The app may communicate with backends over plaintext HTTP; an on-path attacker can read or modify any unencrypted traffic, including authentication tokens.",
-      "cwe": ["CWE-319"],
+      "cwe": [
+        "CWE-319"
+      ],
       "cvss_v3_base": 6.5,
       "owasp_web": "A02:2021 Cryptographic Failures",
       "owasp_api": "API8:2023 Security Misconfiguration",
@@ -20,12 +24,16 @@
     },
     {
       "id": "QUILL-IOS-002",
-      "title": "ATS exception allows HTTP for {dom}",
-      "source_tools": ["quill"],
+      "title": "Mobile Security: ATS exception allows HTTP for {dom}",
+      "source_tools": [
+        "quill"
+      ],
       "risk": "MEDIUM",
       "description": "Per-domain NSExceptionAllowsInsecureHTTPLoads exception bypasses ATS for the listed domain.",
       "impact": "Traffic to the excepted domain is plaintext and subject to interception. Acceptable only for legacy backends you control and have committed to migrating.",
-      "cwe": ["CWE-319"],
+      "cwe": [
+        "CWE-319"
+      ],
       "cvss_v3_base": 5.3,
       "owasp_web": "A02:2021 Cryptographic Failures",
       "remediation_brief": "Migrate the backend to HTTPS and remove the exception.",
@@ -33,8 +41,10 @@
     },
     {
       "id": "QUILL-IOS-010",
-      "title": "Custom URL scheme registered: {sch}://",
-      "source_tools": ["quill"],
+      "title": "Mobile Security: Custom URL scheme registered: {sch}://",
+      "source_tools": [
+        "quill"
+      ],
       "risk": "INFO",
       "description": "Custom URL scheme allows any app on the device to invoke this app with arbitrary parameters.",
       "impact": "If deep-link handlers don't validate parameters or enforce authentication, a malicious app could trigger sensitive actions (password change, in-app purchase, etc.). Verify each handler.",
@@ -45,12 +55,16 @@
     },
     {
       "id": "QUILL-IOS-020",
-      "title": "get-task-allow enabled (debuggable binary)",
-      "source_tools": ["quill"],
+      "title": "Mobile Security: get-task-allow enabled (debuggable binary)",
+      "source_tools": [
+        "quill"
+      ],
       "risk": "HIGH",
       "description": "The binary's entitlements set get-task-allow=true, allowing debuggers to attach.",
       "impact": "An attacker on a jailbroken device can attach lldb to the running process and read memory, dump keychain items, or modify runtime behaviour. Should never ship in App Store builds.",
-      "cwe": ["CWE-489"],
+      "cwe": [
+        "CWE-489"
+      ],
       "cvss_v3_base": 7.1,
       "remediation_brief": "Set get-task-allow=false in the production entitlements file before signing.",
       "remediation_effort": "Easy",
@@ -59,8 +73,10 @@
     },
     {
       "id": "QUILL-IOS-021",
-      "title": "Wildcard application-identifier in entitlements",
-      "source_tools": ["quill"],
+      "title": "Mobile Security: Wildcard application-identifier in entitlements",
+      "source_tools": [
+        "quill"
+      ],
       "risk": "MEDIUM",
       "description": "Wildcard provisioning profile (e.g. com.example.*) used in entitlements.",
       "impact": "Keychain access groups and shared containers are scoped wider than intended; other apps signed with the same wildcard can read shared keychain entries.",
@@ -69,15 +85,25 @@
     },
     {
       "id": "QUILL-IOS-030",
-      "title": "Potential hard-coded secret: {label}",
-      "source_tools": ["quill"],
+      "title": "Information Disclosure: Potential hard-coded secret: {label}",
+      "source_tools": [
+        "quill"
+      ],
       "risk": "HIGH",
       "description": "Pattern matching a known secret format (AWS access key, Google API key, private key, …) was found in the bundle.",
       "impact": "Hard-coded secrets in client binaries are trivially recoverable by anyone with the IPA. If valid in production they grant the attacker the same privileges as the app, often including server-side actions the user is not authorised for.",
-      "cwe": ["CWE-798"],
+      "cwe": [
+        "CWE-798"
+      ],
       "cvss_v3_base": 8.6,
       "owasp_web": "A02:2021 Cryptographic Failures",
-      "mitre_attack": [{"technique": "T1552.001", "tactic": "Credential Access", "name": "Credentials In Files"}],
+      "mitre_attack": [
+        {
+          "technique": "T1552.001",
+          "tactic": "Credential Access",
+          "name": "Credentials In Files"
+        }
+      ],
       "remediation_brief": "Rotate the exposed secret; remove from the bundle; fetch via authenticated server call.",
       "remediation_component": "Application",
       "remediation_category": "Cryptography",

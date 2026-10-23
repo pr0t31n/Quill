@@ -246,7 +246,7 @@ def analyse_info_plist(app_dir: Path, output_dir: Path) -> dict:
     log(f"[info_plist] Checking App Transport Security — ATS config present: {bool(ats)}")
     if ats.get("NSAllowsArbitraryLoads"):
         log("[info_plist] ATS: NSAllowsArbitraryLoads=true — finding emitted")
-        finding(title="App Transport Security: arbitrary loads allowed",
+        finding(title="Mobile Security: App Transport Security: arbitrary loads allowed",
                  severity="HIGH",
                  description=("NSAllowsArbitraryLoads=true disables ATS globally; "
                                "non-HTTPS connections are permitted."),
@@ -260,7 +260,7 @@ def analyse_info_plist(app_dir: Path, output_dir: Path) -> dict:
     for dom, cfg in exc_domains.items():
         if cfg.get("NSExceptionAllowsInsecureHTTPLoads"):
             log(f"[info_plist] ATS: HTTP exception for domain {dom} — finding emitted")
-            finding(title=f"ATS exception allows HTTP for {dom}",
+            finding(title=f"Mobile Security: ATS exception allows HTTP for {dom}",
                      severity="MEDIUM",
                      description=("Per-domain exception allows cleartext HTTP."),
                      data={"catalogue_id": "QUILL-IOS-002",
@@ -274,7 +274,7 @@ def analyse_info_plist(app_dir: Path, output_dir: Path) -> dict:
             log(f"URL scheme: {sch}://")
             if sch.lower() in ("http", "https", "file", "tel", "sms", "mailto"):
                 continue
-            finding(title=f"Custom URL scheme registered: {sch}://",
+            finding(title=f"Mobile Security: Custom URL scheme registered: {sch}://",
                      severity="INFO",
                      description=("Custom URL schemes can be invoked by any app; "
                                    "ensure all parameters are validated and authentication "
@@ -322,7 +322,7 @@ def analyse_entitlements(app_dir: Path, output_dir: Path) -> None:
         log("[entitlements] Checking get-task-allow (debuggable)...")
         if "get-task-allow" in ent and "<true/>" in ent.split("get-task-allow")[-1][:60]:
             log("[entitlements] get-task-allow=true detected — finding emitted")
-            finding(title="get-task-allow enabled (debuggable binary)",
+            finding(title="Mobile Security: get-task-allow enabled (debuggable binary)",
                      severity="HIGH",
                      description=("get-task-allow=true permits attaching a debugger; "
                                    "should be FALSE in production builds."),
@@ -332,7 +332,7 @@ def analyse_entitlements(app_dir: Path, output_dir: Path) -> None:
         log("[entitlements] Checking application-identifier for wildcards...")
         if "application-identifier" in ent and "wildcard" in ent.lower():
             log("[entitlements] Wildcard application-identifier detected — finding emitted")
-            finding(title="Wildcard application-identifier in entitlements",
+            finding(title="Mobile Security: Wildcard application-identifier in entitlements",
                      severity="MEDIUM",
                      description=("Wildcard provisioning profile in use; key-chain "
                                    "sharing scope is over-broad."),
@@ -423,7 +423,7 @@ def analyse_strings(app_dir: Path, output_dir: Path) -> None:
             "\n".join(f"[{label}] {match} (in {source})" for label, match, source in hits),
             encoding="utf-8")
         for label, match, source in hits[:30]:
-            finding(title=f"Potential hard-coded secret: {label}",
+            finding(title=f"Information Disclosure: Potential hard-coded secret: {label}",
                      severity="HIGH",
                      description=(f"Pattern matching {label} was found in {source}. "
                                    "Verify whether this is a real secret or a test fixture."),
@@ -785,7 +785,7 @@ def analyse_strings_apk(app_dir: Path, output_dir: Path) -> None:
             "\n".join(f"[{label}] {match} (in {source})" for label, match, source in hits),
             encoding="utf-8")
         for label, match, source in hits[:30]:
-            finding(title=f"Potential hard-coded secret: {label}",
+            finding(title=f"Information Disclosure: Potential hard-coded secret: {label}",
                      severity="HIGH",
                      description=(f"Pattern matching {label} was found in {source}. "
                                    "Verify whether this is a real secret or a test fixture."),
