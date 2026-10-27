@@ -5,6 +5,7 @@
     {
       "id": "QUILL-IOS-001",
       "title": "Mobile Security: App Transport Security: arbitrary loads allowed",
+      "aliases": [],
       "source_tools": [
         "quill"
       ],
@@ -14,17 +15,36 @@
       "cwe": [
         "CWE-319"
       ],
+      "cve_examples": [],
       "cvss_v3_base": 6.5,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
       "owasp_web": "A02:2021 Cryptographic Failures",
       "owasp_api": "API8:2023 Security Misconfiguration",
+      "nist_csf2": [],
+      "nist_800_53": [],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
       "remediation_brief": "Remove NSAllowsArbitraryLoads or scope to specific domains via NSExceptionDomains.",
       "remediation_component": "Configuration",
       "remediation_category": "Cryptography",
-      "remediation_effort": "Easy"
+      "remediation_effort": "Easy",
+      "validation_tools": []
     },
     {
       "id": "QUILL-IOS-002",
       "title": "Mobile Security: ATS exception allows HTTP for {dom}",
+      "aliases": [],
       "source_tools": [
         "quill"
       ],
@@ -34,28 +54,73 @@
       "cwe": [
         "CWE-319"
       ],
+      "cve_examples": [],
       "cvss_v3_base": 5.3,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
       "owasp_web": "A02:2021 Cryptographic Failures",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
       "remediation_brief": "Migrate the backend to HTTPS and remove the exception.",
-      "remediation_effort": "Moderate"
+      "remediation_component": "Configuration",
+      "remediation_category": "Cryptography",
+      "remediation_effort": "Moderate",
+      "validation_tools": []
     },
     {
       "id": "QUILL-IOS-010",
       "title": "Mobile Security: Custom URL scheme registered: {sch}://",
+      "aliases": [],
       "source_tools": [
         "quill"
       ],
       "risk": "INFO",
       "description": "Custom URL scheme allows any app on the device to invoke this app with arbitrary parameters.",
       "impact": "If deep-link handlers don't validate parameters or enforce authentication, a malicious app could trigger sensitive actions (password change, in-app purchase, etc.). Verify each handler.",
+      "cwe": [],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
       "remediation_brief": "Validate every parameter; require re-authentication for sensitive actions; prefer Universal Links over custom schemes where possible.",
       "remediation_component": "Application",
       "remediation_category": "Input Validation",
-      "remediation_effort": "Moderate"
+      "remediation_effort": "Moderate",
+      "validation_tools": []
     },
     {
       "id": "QUILL-IOS-020",
       "title": "Mobile Security: get-task-allow enabled (debuggable binary)",
+      "aliases": [],
       "source_tools": [
         "quill"
       ],
@@ -65,38 +130,98 @@
       "cwe": [
         "CWE-489"
       ],
+      "cve_examples": [],
       "cvss_v3_base": 7.1,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
       "remediation_brief": "Set get-task-allow=false in the production entitlements file before signing.",
-      "remediation_effort": "Easy",
       "remediation_component": "Configuration",
-      "remediation_category": "Access Control"
+      "remediation_category": "Access Control",
+      "remediation_effort": "Easy",
+      "validation_tools": []
     },
     {
       "id": "QUILL-IOS-021",
       "title": "Mobile Security: Wildcard application-identifier in entitlements",
+      "aliases": [],
       "source_tools": [
         "quill"
       ],
       "risk": "MEDIUM",
       "description": "Wildcard provisioning profile (e.g. com.example.*) used in entitlements.",
       "impact": "Keychain access groups and shared containers are scoped wider than intended; other apps signed with the same wildcard can read shared keychain entries.",
+      "cwe": [],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
       "remediation_brief": "Use specific bundle-identifier provisioning profiles in production.",
-      "remediation_effort": "Easy"
+      "remediation_component": "Configuration",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Easy",
+      "validation_tools": []
     },
     {
       "id": "QUILL-IOS-030",
       "title": "Information Disclosure: Potential hard-coded secret: {label}",
+      "aliases": [],
       "source_tools": [
         "quill"
       ],
       "risk": "HIGH",
-      "description": "Pattern matching a known secret format (AWS access key, Google API key, private key, …) was found in the bundle.",
+      "description": "Pattern matching a known secret format (AWS access key, Google API key, private key, \u2026) was found in the bundle.",
       "impact": "Hard-coded secrets in client binaries are trivially recoverable by anyone with the IPA. If valid in production they grant the attacker the same privileges as the app, often including server-side actions the user is not authorised for.",
       "cwe": [
         "CWE-798"
       ],
+      "cve_examples": [],
       "cvss_v3_base": 8.6,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
       "owasp_web": "A02:2021 Cryptographic Failures",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
       "mitre_attack": [
         {
           "technique": "T1552.001",
@@ -104,10 +229,1591 @@
           "name": "Credentials In Files"
         }
       ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
       "remediation_brief": "Rotate the exposed secret; remove from the bundle; fetch via authenticated server call.",
       "remediation_component": "Application",
       "remediation_category": "Cryptography",
-      "remediation_effort": "Significant"
+      "remediation_effort": "Significant",
+      "validation_tools": []
+    },
+    {
+      "id": "QUILL-IOS-040",
+      "title": "Mobile Security: NX bit / no-heap-execution flag missing",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "The iOS binary Mach-O header does not include the MH_NO_HEAP_EXECUTION flag, indicating that the NX (No eXecute) heap protection may not be enforced.",
+      "impact": "Without NX heap protection an attacker who achieves a heap overflow can place shellcode on the heap and execute it directly, simplifying exploitation of memory-corruption vulnerabilities.",
+      "cwe": [
+        "CWE-119"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 5.3,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SI-16"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "6.2.4"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1203",
+          "tactic": "Execution",
+          "name": "Exploitation for Client Execution"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Compile the binary with standard Xcode settings that enable NX and heap protection; avoid disabling MH_NO_HEAP_EXECUTION.",
+      "remediation_component": "Application",
+      "remediation_category": "Configuration",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "otool"
+      ]
+    },
+    {
+      "id": "QUILL-IOS-041",
+      "title": "Mobile Security: PIE (Position Independent Executable) not enabled",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "The iOS binary Mach-O header does not include the MH_PIE flag. Without PIE, Address Space Layout Randomization (ASLR) cannot randomize the binary's load address.",
+      "impact": "An attacker exploiting a memory-corruption bug can predict code and data addresses reliably, making ROP chains and return-to-libc attacks significantly easier. All App Store binaries are expected to be PIE.",
+      "cwe": [
+        "CWE-119"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 7.1,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SI-16"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "6.2.4"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1203",
+          "tactic": "Execution",
+          "name": "Exploitation for Client Execution"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Recompile the binary as a Position Independent Executable (PIE); in Xcode ensure 'Generate Position-Dependent Code' is set to NO.",
+      "remediation_component": "Application",
+      "remediation_category": "Configuration",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "otool"
+      ]
+    },
+    {
+      "id": "QUILL-IOS-042",
+      "title": "Mobile Security: Stack canary (stack protector) missing",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "The iOS binary does not import ___stack_chk_fail or ___stack_chk_guard symbols, indicating that stack smashing protection (-fstack-protector) is not compiled in.",
+      "impact": "Without stack canaries, a buffer overflow on the stack can silently overwrite the return address and redirect execution. Stack canaries detect such corruption before the function returns, making exploitation materially harder.",
+      "cwe": [
+        "CWE-121"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 7.5,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SI-16"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "6.2.4"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1203",
+          "tactic": "Execution",
+          "name": "Exploitation for Client Execution"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Compile with -fstack-protector-all (Xcode default for release builds); verify ___stack_chk_fail appears in the symbol table.",
+      "remediation_component": "Application",
+      "remediation_category": "Configuration",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "otool"
+      ]
+    },
+    {
+      "id": "QUILL-IOS-043",
+      "title": "Mobile Security: Automatic Reference Counting (ARC) not enabled",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "The iOS binary does not import _objc_release, indicating that Automatic Reference Counting (ARC) is not enabled for the Objective-C codebase.",
+      "impact": "Manual memory management without ARC is prone to use-after-free, double-free, and dangling-pointer vulnerabilities. An attacker who triggers such a bug can achieve arbitrary code execution.",
+      "cwe": [
+        "CWE-416"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 7.5,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SI-16"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "6.2.4"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1203",
+          "tactic": "Execution",
+          "name": "Exploitation for Client Execution"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Enable ARC for all Objective-C source files (Xcode: Objective-C Automatic Reference Counting = YES); migrate any manual retain/release code.",
+      "remediation_component": "Application",
+      "remediation_category": "Configuration",
+      "remediation_effort": "Significant",
+      "validation_tools": [
+        "otool"
+      ]
+    },
+    {
+      "id": "QUILL-IOS-044",
+      "title": "Mobile Security: RPATH load command found in binary",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "INFO",
+      "description": "The Mach-O binary contains one or more LC_RPATH load commands that define runtime library search paths.",
+      "impact": "While RPATH is commonly used for framework loading, a writable or user-controllable RPATH entry on a jailbroken device could allow dylib injection. Review paths to ensure none are attacker-writable.",
+      "cwe": [],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Audit LC_RPATH entries; remove any that point to writable or non-standard paths; use @rpath/@executable_path relative references.",
+      "remediation_component": "Application",
+      "remediation_category": "Configuration",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "otool"
+      ]
+    },
+    {
+      "id": "QUILL-IOS-045",
+      "title": "Mobile Security: Binary is not code-signed",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "The codesign utility reports that the main binary lacks a valid code signature.",
+      "impact": "An unsigned binary cannot be verified for integrity or publisher identity. On a jailbroken device an attacker could replace or patch the binary without detection. Unsigned apps are rejected by the App Store.",
+      "cwe": [
+        "CWE-353"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 7.1,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SI-7"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1036",
+          "tactic": "Defense Evasion",
+          "name": "Masquerading"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Sign the binary with a valid Apple Developer certificate before distribution.",
+      "remediation_component": "Application",
+      "remediation_category": "Configuration",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "codesign"
+      ]
+    },
+    {
+      "id": "QUILL-IOS-046",
+      "title": "Mobile Security: Binary is not encrypted (FairPlay)",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "The LC_ENCRYPTION_INFO / LC_ENCRYPTION_INFO_64 load command shows cryptid=0, meaning the binary is not encrypted with Apple's FairPlay DRM.",
+      "impact": "An unencrypted binary can be directly disassembled and reverse-engineered without a decryption step. This lowers the bar for extracting proprietary algorithms, API keys, and business logic.",
+      "cwe": [
+        "CWE-311"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 4.3,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SC-28"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1588.002",
+          "tactic": "Resource Development",
+          "name": "Obtain Capabilities: Tool"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Distribute the app through the App Store (which applies FairPlay encryption automatically); for enterprise distribution consider additional code-obfuscation tools.",
+      "remediation_component": "Application",
+      "remediation_category": "Cryptography",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "otool"
+      ]
+    },
+    {
+      "id": "QUILL-IOS-047",
+      "title": "Mobile Security: Debug symbols not stripped from binary",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "LOW",
+      "description": "The nm utility reports that the binary still contains symbol names, indicating debug symbols have not been stripped for the release build.",
+      "impact": "Debug symbols reveal internal class names, method names, and data structures, significantly aiding reverse engineering. While not directly exploitable, they lower the cost of discovering vulnerabilities.",
+      "cwe": [
+        "CWE-215"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 3.3,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Enable Strip Linked Product and Strip Debug Symbols During Copy in Xcode release build settings; run 'strip' on the binary before packaging.",
+      "remediation_component": "Application",
+      "remediation_category": "Configuration",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "nm",
+        "strip"
+      ]
+    },
+    {
+      "id": "QUILL-IOS-050",
+      "title": "Mobile Security: Insecure C API usage detected",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "The iOS binary imports potentially dangerous C standard library functions (e.g. strcpy, strcat, sprintf, gets, memcpy) that are known sources of buffer overflow vulnerabilities.",
+      "impact": "Use of unsafe C string and memory functions without bounds checking can lead to stack and heap buffer overflows. An attacker who controls the input to these functions can achieve arbitrary code execution.",
+      "cwe": [
+        "CWE-676"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 5.3,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SI-16"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "6.2.4"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1203",
+          "tactic": "Execution",
+          "name": "Exploitation for Client Execution"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Replace unsafe C functions with bounds-checked alternatives: strlcpy/strlcat instead of strcpy/strcat, snprintf instead of sprintf, fgets instead of gets, memcpy_s or explicit length checks.",
+      "remediation_component": "Application",
+      "remediation_category": "Input Validation",
+      "remediation_effort": "Significant",
+      "validation_tools": [
+        "otool",
+        "nm"
+      ]
+    },
+    {
+      "id": "QUILL-IOS-051",
+      "title": "Mobile Security: NSLog usage detected in binary",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "The iOS binary imports _NSLog, which writes to the system console log. Production builds should not log sensitive data.",
+      "impact": "NSLog output is readable by any app on a jailbroken device and by anyone with physical access via Xcode or Console.app. Sensitive data (tokens, passwords, PII) logged via NSLog is exposed to other processes and forensic extraction.",
+      "cwe": [
+        "CWE-532"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 4.3,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "AU-9"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "3.4.1"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Remove or guard NSLog calls in release builds; use os_log with appropriate privacy levels or a logging framework that strips debug logs from production.",
+      "remediation_component": "Application",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "nm",
+        "otool"
+      ]
+    },
+    {
+      "id": "QUILL-IOS-052",
+      "title": "Mobile Security: malloc without calloc usage detected",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "INFO",
+      "description": "The binary imports _malloc but does not import _calloc. malloc returns uninitialized memory, which can leak sensitive data if not explicitly zeroed.",
+      "impact": "Uninitialized heap memory may contain residual data from previous allocations (passwords, tokens, keys). If the application reads these bytes before writing, it may inadvertently process or expose stale secrets. Using calloc instead auto-zeros allocated memory.",
+      "cwe": [
+        "CWE-789"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Prefer calloc over malloc for security-sensitive allocations; alternatively memset allocated buffers to zero immediately after malloc.",
+      "remediation_component": "Application",
+      "remediation_category": "Input Validation",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "nm"
+      ]
+    },
+    {
+      "id": "QUILL-IOS-055",
+      "title": "Mobile Security: Framework/dylib binary missing exploit mitigation: {check}",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "A bundled framework or dylib binary is missing a standard exploit mitigation (stack canary or ARC). The same protections required of the main binary apply to all embedded code.",
+      "impact": "A vulnerability in a bundled framework without stack canaries or ARC is as exploitable as one in the main binary. Third-party frameworks are a common attack surface because they are less frequently audited.",
+      "cwe": [
+        "CWE-693"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 5.3,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SI-16"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "6.2.4"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Rebuild or obtain updated versions of bundled frameworks compiled with -fstack-protector-all and ARC enabled; contact the framework vendor if source is unavailable.",
+      "remediation_component": "Application",
+      "remediation_category": "Configuration",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "otool"
+      ]
+    },
+    {
+      "id": "QUILL-IOS-070",
+      "title": "Mobile Security: iOS permission requested: {permission_key}",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "INFO",
+      "description": "The application's Info.plist declares a privacy-sensitive usage description key, requesting access to a protected resource (camera, microphone, location, contacts, etc.).",
+      "impact": "Each privacy permission grants the app access to sensitive user data. While individually justifiable, the combination of permissions defines the app's data reach. An attacker who compromises the app inherits all granted permissions.",
+      "cwe": [],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "AC-6"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Verify each permission is justified by the app's core functionality; remove any permissions not strictly necessary; request permissions just-in-time rather than at launch.",
+      "remediation_component": "Application",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Easy",
+      "validation_tools": []
+    },
+    {
+      "id": "QUILL-IOS-071",
+      "title": "Mobile Security: Excessive iOS permissions requested",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "The application requests more than 6 sensitive iOS privacy permissions, indicating a broad data-access footprint that exceeds what most single-purpose apps require.",
+      "impact": "An app with excessive permissions exposes a wider attack surface: if compromised, the attacker gains access to camera, microphone, location, contacts, health data, and more simultaneously. Users and reviewers should question whether every permission is essential.",
+      "cwe": [
+        "CWE-250"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 4.3,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "AC-6"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Audit all declared usage-description keys in Info.plist; remove permissions not essential to core functionality; apply the principle of least privilege.",
+      "remediation_component": "Application",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Moderate",
+      "validation_tools": []
+    },
+    {
+      "id": "QUILL-APK-001",
+      "title": "Application is debuggable",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "android:debuggable=true allows attaching a debugger to the running app, enabling memory inspection, method interception, and data extraction.",
+      "impact": "An attacker on a rooted device or via ADB can attach a debugger (jdb, LLDB) to the running process, inspect heap memory, modify variables at runtime, bypass authentication checks, and extract encryption keys or credentials from memory.",
+      "cwe": [
+        "CWE-489"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 7.1,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "CM-7"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "6.2.2"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1407",
+          "tactic": "Defense Evasion",
+          "name": "Download New Code at Runtime"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Set android:debuggable=false in the AndroidManifest.xml for all release builds; use build variants to ensure debug flags never ship to production.",
+      "remediation_component": "Configuration",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apktool",
+        "aapt"
+      ]
+    },
+    {
+      "id": "QUILL-APK-002",
+      "title": "Application allows backup",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "android:allowBackup is true (or not explicitly set to false), allowing adb backup to extract application data including databases and shared preferences.",
+      "impact": "An attacker with physical access or ADB access can extract the entire app sandbox via 'adb backup', obtaining databases, SharedPreferences, cached credentials, session tokens, and other sensitive files without root access.",
+      "cwe": [
+        "CWE-530"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 5.5,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SC-28"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "3.4.1"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1532",
+          "tactic": "Exfiltration",
+          "name": "Archive Collected Data"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Set android:allowBackup=false in AndroidManifest.xml, or implement a BackupAgent that encrypts sensitive data before backup.",
+      "remediation_component": "Configuration",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apktool",
+        "aapt"
+      ]
+    },
+    {
+      "id": "QUILL-APK-003",
+      "title": "Cleartext traffic allowed",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "android:usesCleartextTraffic=true allows unencrypted HTTP connections globally from the application.",
+      "impact": "All network traffic from the app can be sent over plaintext HTTP. An on-path attacker (e.g. on public Wi-Fi) can intercept, read, and modify requests and responses including authentication credentials, session tokens, and personal data.",
+      "cwe": [
+        "CWE-319"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 6.5,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A02:2021 Cryptographic Failures",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SC-8"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "4.2.1"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1040",
+          "tactic": "Credential Access",
+          "name": "Network Sniffing"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Set android:usesCleartextTraffic=false in AndroidManifest.xml; use a network security config to scope any necessary cleartext exceptions to specific domains.",
+      "remediation_component": "Configuration",
+      "remediation_category": "Cryptography",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apktool"
+      ]
+    },
+    {
+      "id": "QUILL-APK-010",
+      "title": "Exported {component_type} without permission: {name}",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "An Android component (activity, service, receiver, or provider) is exported and accessible by any app without requiring a custom permission.",
+      "impact": "Any app on the device can invoke the exported component directly via an Intent. If the component handles sensitive operations (user data, transactions, internal APIs) without its own authentication, an attacker's app can abuse it to extract data or trigger privileged actions.",
+      "cwe": [
+        "CWE-926"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 5.3,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "AC-3"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1416",
+          "tactic": "Privilege Escalation",
+          "name": "URI Hijacking"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Set android:exported=false on components that do not need to be externally accessible; add a custom permission with android:protectionLevel='signature' to restrict access.",
+      "remediation_component": "Configuration",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apktool",
+        "drozer"
+      ]
+    },
+    {
+      "id": "QUILL-APK-020",
+      "title": "Low minimum SDK version: API {version}",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "LOW",
+      "description": "The application's minSdkVersion targets an Android API level below 24 (Android 7.0), which lacks several modern security features.",
+      "impact": "Devices running older Android versions do not enforce network security config by default, lack file-based encryption, do not support scoped storage, and miss numerous security patches. The app's security posture is limited to the lowest supported platform.",
+      "cwe": [],
+      "cve_examples": [],
+      "cvss_v3_base": 3.3,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "CM-6"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Raise minSdkVersion to at least API 24 (Android 7.0) to inherit network security config, file-based encryption, and other platform security features.",
+      "remediation_component": "Configuration",
+      "remediation_category": "Configuration",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "apktool",
+        "aapt"
+      ]
+    },
+    {
+      "id": "QUILL-APK-030",
+      "title": "Excessive dangerous permissions ({count})",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "The application requests more than 10 Android dangerous (runtime) permissions, indicating an overly broad data-access footprint.",
+      "impact": "Excessive permissions expand the attack surface: if the app is compromised, the attacker inherits access to camera, microphone, location, contacts, SMS, storage, and more. Users are less likely to scrutinize individual permission prompts when there are many.",
+      "cwe": [
+        "CWE-250"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 4.3,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "AC-6"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Audit all dangerous permission requests; remove any not strictly required by core functionality; apply the principle of least privilege.",
+      "remediation_component": "Application",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "apktool",
+        "aapt"
+      ]
+    },
+    {
+      "id": "QUILL-APK-031",
+      "title": "Dangerous permission: {name}",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "INFO",
+      "description": "The app requests a specific Android dangerous (runtime) permission, classified by Android as granting access to sensitive user data or device capabilities.",
+      "impact": "Each dangerous permission grants access to a sensitive resource (camera, microphone, location, contacts, etc.). While individually justifiable, each adds to the app's data-access footprint and the potential impact if the app is compromised.",
+      "cwe": [],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "AC-6"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Verify the permission is justified by the app's core functionality; request it just-in-time rather than at launch; remove if not essential.",
+      "remediation_component": "Application",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Easy",
+      "validation_tools": []
+    },
+    {
+      "id": "QUILL-APK-040",
+      "title": "Information Disclosure: Potential hard-coded secret: {label}",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "Pattern matching a known secret format (AWS access key, Google API key, private key, JWT, etc.) was found in the APK bundle (DEX, smali, or resource files).",
+      "impact": "Hard-coded secrets in APKs are trivially recoverable via decompilation (jadx, apktool). If valid in production they grant the attacker the same privileges as the app, often including server-side API access, cloud resource manipulation, or payment processing.",
+      "cwe": [
+        "CWE-798"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 8.6,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A02:2021 Cryptographic Failures",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "IA-5"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "6.2.4"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1552.001",
+          "tactic": "Credential Access",
+          "name": "Credentials In Files"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Rotate the exposed secret immediately; remove from the APK; fetch credentials via an authenticated server call at runtime.",
+      "remediation_component": "Application",
+      "remediation_category": "Cryptography",
+      "remediation_effort": "Significant",
+      "validation_tools": [
+        "apktool",
+        "jadx"
+      ]
+    },
+    {
+      "id": "QUILL-APK-090",
+      "title": "Network Security Config: base config allows cleartext traffic",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "The network_security_config.xml base-config element has cleartextTrafficPermitted='true', allowing unencrypted HTTP connections to all domains by default.",
+      "impact": "All HTTP traffic from the app is unencrypted. An on-path attacker can intercept, read, and modify every request and response, including credentials, session tokens, and personal data. This overrides Android's default HTTPS-only behaviour on API 28+.",
+      "cwe": [
+        "CWE-319"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 6.5,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A02:2021 Cryptographic Failures",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SC-8"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "4.2.1"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1040",
+          "tactic": "Credential Access",
+          "name": "Network Sniffing"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Set cleartextTrafficPermitted='false' in the base-config; use domain-config exceptions only for domains that genuinely require HTTP and are on a migration path.",
+      "remediation_component": "Configuration",
+      "remediation_category": "Cryptography",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apktool"
+      ]
+    },
+    {
+      "id": "QUILL-APK-091",
+      "title": "Network Security Config: domain config trusts user-installed certificates",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "A domain-config in network_security_config.xml includes a trust-anchors element with certificates src='user', causing the app to trust user-installed CA certificates for that domain.",
+      "impact": "An attacker who installs their own CA certificate on the device (via social engineering, MDM, or physical access) can perform a man-in-the-middle attack against the configured domain. All HTTPS traffic to that domain can be intercepted and decrypted.",
+      "cwe": [
+        "CWE-295"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 7.4,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A02:2021 Cryptographic Failures",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SC-8",
+        "SC-23"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "4.2.1"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1557",
+          "tactic": "Credential Access",
+          "name": "Adversary-in-the-Middle"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Remove certificates src='user' from trust-anchors in production builds; trust only system CAs or pin specific certificates.",
+      "remediation_component": "Configuration",
+      "remediation_category": "Cryptography",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apktool"
+      ]
+    },
+    {
+      "id": "QUILL-APK-092",
+      "title": "Network Security Config: domain permits cleartext traffic",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "A domain-config in network_security_config.xml permits cleartext traffic (cleartextTrafficPermitted='true') for a specific domain with includeSubdomains='true'.",
+      "impact": "HTTP traffic to the specified domain and all its subdomains is unencrypted and subject to interception. While scoped to a specific domain, any subdomain matching the pattern inherits the cleartext exception, broadening the exposure.",
+      "cwe": [
+        "CWE-319"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 5.3,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A02:2021 Cryptographic Failures",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SC-8"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "4.2.1"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1040",
+          "tactic": "Credential Access",
+          "name": "Network Sniffing"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Migrate the domain to HTTPS and remove the cleartext exception; if HTTP is temporarily necessary, scope the domain-config to the narrowest domain without includeSubdomains.",
+      "remediation_component": "Configuration",
+      "remediation_category": "Cryptography",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "apktool"
+      ]
+    },
+    {
+      "id": "QUILL-DYN-001",
+      "title": "Dynamic: SSL pinning bypass \u2014 vulnerable (Android)",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "Frida SSL pinning bypass succeeded on Android target, indicating the app does not implement certificate pinning or its implementation is bypassable.",
+      "impact": "An attacker can position a proxy between the app and its server to intercept, read, and modify all HTTPS traffic including authentication tokens and sensitive data.",
+      "cwe": [
+        "CWE-295"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 7.4,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A02:2021 Cryptographic Failures",
+      "owasp_api": "API8:2023 Security Misconfiguration",
+      "nist_csf2": [
+        "PR.DS-2"
+      ],
+      "nist_800_53": [
+        "SC-8",
+        "SC-23"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "4.2.1"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1557",
+          "tactic": "Credential Access",
+          "name": "Adversary-in-the-Middle"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Implement certificate pinning using TrustKit, OkHttp CertificatePinner, or network_security_config with pin-set.",
+      "remediation_component": "Application",
+      "remediation_category": "Cryptography",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "frida",
+        "objection",
+        "quill"
+      ]
+    },
+    {
+      "id": "QUILL-DYN-002",
+      "title": "Dynamic: Root detection bypass \u2014 vulnerable (Android)",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "Frida root detection bypass succeeded; the app does not adequately detect a rooted environment or its checks are easily bypassed.",
+      "impact": "An attacker on a rooted device can hook runtime methods, extract credentials from memory, bypass payment flows, and tamper with app logic without the app detecting the hostile environment.",
+      "cwe": [
+        "CWE-919"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 6.5,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SI-7"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1398",
+          "tactic": "Privilege Escalation",
+          "name": "Modify OS Kernel or Boot Partition"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Implement multi-layered root detection (SafetyNet/Play Integrity, file-based, property-based) with obfuscation.",
+      "remediation_component": "Application",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Significant",
+      "validation_tools": [
+        "frida",
+        "objection",
+        "quill"
+      ]
+    },
+    {
+      "id": "QUILL-DYN-003",
+      "title": "Dynamic: Data storage monitoring \u2014 insecure storage detected (Android)",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "Frida data storage hooks captured SharedPreferences writes or SQLite queries containing potentially sensitive data.",
+      "impact": "Sensitive data stored in SharedPreferences or SQLite in plaintext can be extracted from a rooted device or from adb backup if allowBackup is true.",
+      "cwe": [
+        "CWE-312",
+        "CWE-922"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 5.5,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A02:2021 Cryptographic Failures",
+      "owasp_api": "",
+      "nist_csf2": [
+        "PR.DS-1"
+      ],
+      "nist_800_53": [
+        "SC-28"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "3.5.1"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Encrypt sensitive data at rest using EncryptedSharedPreferences or SQLCipher; avoid storing secrets locally.",
+      "remediation_component": "Application",
+      "remediation_category": "Cryptography",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "frida",
+        "quill"
+      ]
+    },
+    {
+      "id": "QUILL-DYN-004",
+      "title": "Dynamic: Weak cryptographic API usage detected (Android)",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "Frida crypto hooks observed the app using deprecated or weak cryptographic transforms (DES, ECB mode, MD5, SHA1 for integrity).",
+      "impact": "Weak cryptography can be broken by an attacker to decrypt stored data, forge tokens, or bypass integrity checks.",
+      "cwe": [
+        "CWE-327",
+        "CWE-328"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 5.3,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A02:2021 Cryptographic Failures",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SC-12",
+        "SC-13"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Replace weak algorithms with AES-256-GCM for encryption and SHA-256+ for hashing; avoid ECB mode.",
+      "remediation_component": "Application",
+      "remediation_category": "Cryptography",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "frida",
+        "quill"
+      ]
+    },
+    {
+      "id": "QUILL-DYN-005",
+      "title": "Dynamic: WebView security issue detected (Android)",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "Frida WebView hooks detected WebView debug mode enabled or JavaScript enabled in a WebView that loads external content.",
+      "impact": "Debug-enabled WebViews allow Chrome DevTools attachment on rooted devices. JavaScript-enabled WebViews loading external content are susceptible to XSS and data exfiltration.",
+      "cwe": [
+        "CWE-489",
+        "CWE-79"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 5.5,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A03:2021 Injection",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SI-10"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Disable setWebContentsDebuggingEnabled in production; restrict JavaScript to trusted content only.",
+      "remediation_component": "Application",
+      "remediation_category": "Input Validation",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "frida",
+        "quill"
+      ]
+    },
+    {
+      "id": "QUILL-DYN-010",
+      "title": "Dynamic: SSL pinning bypass \u2014 vulnerable (iOS)",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "Frida SSL pinning bypass succeeded on iOS target via SSLSetSessionOption or NSURLSession hooks.",
+      "impact": "Same as Android: all HTTPS traffic can be intercepted, including tokens and PII.",
+      "cwe": [
+        "CWE-295"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 7.4,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A02:2021 Cryptographic Failures",
+      "owasp_api": "",
+      "nist_csf2": [
+        "PR.DS-2"
+      ],
+      "nist_800_53": [
+        "SC-8",
+        "SC-23"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "4.2.1"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1557",
+          "tactic": "Credential Access",
+          "name": "Adversary-in-the-Middle"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Implement TrustKit or URLSessionDelegate-based certificate pinning.",
+      "remediation_component": "Application",
+      "remediation_category": "Cryptography",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "frida",
+        "objection",
+        "quill"
+      ]
+    },
+    {
+      "id": "QUILL-DYN-011",
+      "title": "Dynamic: Jailbreak detection bypass \u2014 vulnerable (iOS)",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "Frida jailbreak detection bypass succeeded; the app does not detect or adequately prevent running on a jailbroken device.",
+      "impact": "On a jailbroken device an attacker can hook Objective-C methods, dump the keychain, bypass payment logic, and modify runtime behaviour.",
+      "cwe": [
+        "CWE-919"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 6.5,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SI-7"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Implement multi-layered jailbreak detection (file-based, dylib injection, Cydia checks) with runtime integrity validation.",
+      "remediation_component": "Application",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Significant",
+      "validation_tools": [
+        "frida",
+        "objection",
+        "quill"
+      ]
+    },
+    {
+      "id": "QUILL-DYN-012",
+      "title": "Dynamic: Keychain monitoring \u2014 insecure keychain usage (iOS)",
+      "aliases": [],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "Frida keychain hooks detected SecItemAdd/SecItemCopyMatching activity, indicating keychain usage that may store sensitive items with weak access controls.",
+      "impact": "Keychain items with kSecAttrAccessibleAlways or without access-group restrictions can be extracted by a jailbroken-device attacker or from an iTunes backup.",
+      "cwe": [
+        "CWE-922"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 5.5,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [
+        "PR.DS-1"
+      ],
+      "nist_800_53": [
+        "SC-28"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Use kSecAttrAccessibleWhenUnlockedThisDeviceOnly for sensitive items; set access groups explicitly.",
+      "remediation_component": "Application",
+      "remediation_category": "Cryptography",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "frida",
+        "quill"
+      ]
     }
   ]
 }

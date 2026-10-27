@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 import plistlib
@@ -800,6 +801,703 @@ def analyse_strings_apk(app_dir: Path, output_dir: Path) -> None:
     status("strings_apk", "APK hard-coded secret scan", "complete")
 
 
+# ── iOS binary analysis ──────────────────────────────────────────────────────
+
+def _find_ios_main_binary(app_dir: Path) -> Optional[Path]:
+    app_name = app_dir.name.replace(".app", "")
+    binary = app_dir / app_name
+    if binary.exists() and binary.is_file():
+        return binary
+    for p in app_dir.iterdir():
+        if p.is_file() and not p.suffix and os.access(str(p), os.X_OK):
+            return p
+    return None
+
+
+def _run_tool_cmd(cmd: list, *, output_file: str = "", timeout: int = 60,
+                  tool_name: str = "") -> Optional[subprocess.CompletedProcess]:
+    try:
+        if _ur is not None:
+            return _ur.run_tool(cmd, output_file=output_file, timeout=timeout,
+                                tool_name=tool_name,
+                                errors_log=(str(_RUN_DIR / "errors.log")
+                                            if _RUN_DIR is not None else None))
+        else:
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except Exception as exc:
+        err(f"{tool_name or cmd[0]} error: {exc}")
+        return None
+
+
+def _check_binary_mitigations(binary: Path, output_dir: Path,
+                               label_prefix: str = "") -> dict:
+    otool = shutil.which("otool")
+    nm_bin = shutil.which("nm")
+    codesign = shutil.which("codesign")
+    results = {}
+
+    bin_name = binary.name
+    pfx = f"[{label_prefix}] " if label_prefix else ""
+
+    # ── otool -hv: PIE and NX flags ──
+    if otool:
+        out_file = output_dir / f"{bin_name}_otool_header.txt"
+        cp = _run_tool_cmd([otool, "-hv", str(binary)],
+                           output_file=str(out_file), timeout=60,
+                           tool_name="otool")
+        if cp is not None:
+            header = cp.stdout or ""
+            out_file.write_text(header, encoding="utf-8")
+            flags_line = ""
+            for line in header.splitlines():
+                stripped = line.strip()
+                if stripped and not stripped.startswith("Mach") and not stripped.startswith("magic"):
+                    if "PIE" in stripped or "EXECUTE" in stripped or "MH_" in stripped:
+                        flags_line = stripped
+                        break
+            if not flags_line:
+                lines = header.strip().splitlines()
+                if len(lines) >= 4:
+                    flags_line = lines[-1].strip()
+
+            results["pie"] = "PIE" in header
+            results["nx"] = "MH_NO_HEAP_EXECUTION" in header or results["pie"]
+            log(f"{pfx}otool -hv flags: PIE={results['pie']}, NX={results['nx']}")
+
+        # ── otool -I -v: stack canary and ARC symbols ──
+        out_file_syms = output_dir / f"{bin_name}_otool_symbols.txt"
+        cp2 = _run_tool_cmd([otool, "-I", "-v", str(binary)],
+                            output_file=str(out_file_syms), timeout=120,
+                            tool_name="otool")
+        if cp2 is not None:
+            syms = cp2.stdout or ""
+            out_file_syms.write_text(syms, encoding="utf-8")
+            results["stack_canary"] = ("___stack_chk_fail" in syms
+                                       and "___stack_chk_guard" in syms)
+            results["arc"] = "_objc_release" in syms
+            log(f"{pfx}otool -I -v: stack_canary={results.get('stack_canary')}, "
+                f"ARC={results.get('arc')}")
+
+        # ── otool -l: RPATH and encryption ──
+        out_file_load = output_dir / f"{bin_name}_otool_load.txt"
+        cp3 = _run_tool_cmd([otool, "-l", str(binary)],
+                            output_file=str(out_file_load), timeout=60,
+                            tool_name="otool")
+        if cp3 is not None:
+            load_cmds = cp3.stdout or ""
+            out_file_load.write_text(load_cmds, encoding="utf-8")
+            results["rpath"] = "LC_RPATH" in load_cmds
+
+            encrypted = False
+            in_enc_section = False
+            for line in load_cmds.splitlines():
+                stripped = line.strip()
+                if "LC_ENCRYPTION_INFO" in stripped:
+                    in_enc_section = True
+                if in_enc_section and stripped.startswith("cryptid"):
+                    try:
+                        cid = int(stripped.split()[-1])
+                        encrypted = cid != 0
+                    except (ValueError, IndexError):
+                        pass
+                    in_enc_section = False
+            results["encrypted"] = encrypted
+            log(f"{pfx}otool -l: RPATH={results.get('rpath')}, encrypted={encrypted}")
+
+    # ── codesign -dv: code signature ──
+    if codesign:
+        out_file_cs = output_dir / f"{bin_name}_codesign.txt"
+        cp4 = _run_tool_cmd([codesign, "-dv", str(binary)],
+                            output_file=str(out_file_cs), timeout=30,
+                            tool_name="codesign")
+        if cp4 is not None:
+            cs_out = (cp4.stdout or "") + (cp4.stderr or "")
+            out_file_cs.write_text(cs_out, encoding="utf-8")
+            results["signed"] = "Signature=" in cs_out or "valid on disk" in cs_out.lower()
+            log(f"{pfx}codesign: signed={results.get('signed')}")
+
+    # ── nm: debug symbols stripped ──
+    if nm_bin:
+        out_file_nm = output_dir / f"{bin_name}_nm.txt"
+        cp5 = _run_tool_cmd([nm_bin, str(binary)],
+                            output_file=str(out_file_nm), timeout=60,
+                            tool_name="nm")
+        if cp5 is not None:
+            nm_out = cp5.stdout or ""
+            nm_stderr = cp5.stderr or ""
+            out_file_nm.write_text(nm_out, encoding="utf-8")
+            sym_count = len(nm_out.strip().splitlines())
+            results["symbols_stripped"] = sym_count < 10 or "no symbols" in nm_stderr.lower()
+            log(f"{pfx}nm: {sym_count} symbol(s), stripped={results.get('symbols_stripped')}")
+
+    return results
+
+
+def analyse_ios_binary(app_dir: Path, output_dir: Path) -> None:
+    _check_pause()
+    _save_checkpoint()
+    log(f"[ios_binary] Starting iOS binary exploit mitigation analysis for {app_dir.name}...")
+    status("ios_binary", "iOS binary mitigations", "running")
+
+    otool = shutil.which("otool")
+    nm_bin = shutil.which("nm")
+    if not otool:
+        log("[ios_binary] otool not available — skipping binary mitigations (macOS-only)")
+        status("ios_binary", "iOS binary mitigations", "skipped")
+        return
+
+    binary = _find_ios_main_binary(app_dir)
+    if not binary:
+        err("[ios_binary] Main binary not found in .app bundle")
+        status("ios_binary", "iOS binary mitigations", "error")
+        return
+
+    log(f"[ios_binary] Analysing main binary: {binary.name} ({binary.stat().st_size / 1048576:.1f} MB)")
+    out_file = output_dir / "ios_binary_mitigations.json"
+
+    results = _check_binary_mitigations(binary, output_dir, label_prefix="ios_binary")
+
+    out_file.write_text(json.dumps(results, indent=2), encoding="utf-8")
+    _analysis_log(out_file, "iOS binary exploit mitigations",
+                  [f"binary: {binary}",
+                   f"otool: {otool}",
+                   f"nm: {nm_bin}",
+                   f"checks: PIE, NX, stack_canary, ARC, RPATH, signed, encrypted, symbols"])
+
+    if "nx" in results and not results["nx"]:
+        finding(title="Mobile Security: NX (No-Execute) bit not confirmed",
+                severity="MEDIUM",
+                description=("The binary does not appear to have the NX/MH_NO_HEAP_EXECUTION flag set. "
+                             "Modern iOS enforces NX when PIE is enabled; missing PIE implies NX may "
+                             "not be enforced, increasing exploitability of memory corruption bugs."),
+                data={"catalogue_id": "QUILL-IOS-040",
+                      "affected": str(binary),
+                      "remediation": "Enable PIE (Position Independent Executable) which implicitly enables NX on iOS."},
+                output_file=str(out_file))
+
+    if "pie" in results and not results["pie"]:
+        finding(title="Mobile Security: PIE (Position Independent Executable) not enabled",
+                severity="HIGH",
+                description=("The binary is not compiled as a Position Independent Executable. "
+                             "Without PIE, ASLR cannot randomise the base address, making "
+                             "return-oriented programming (ROP) attacks significantly easier."),
+                data={"catalogue_id": "QUILL-IOS-041",
+                      "affected": str(binary),
+                      "remediation": "Recompile with -fPIE / -pie flags. Xcode enables this by default for iOS."},
+                output_file=str(out_file))
+
+    if "stack_canary" in results and not results["stack_canary"]:
+        finding(title="Mobile Security: Stack canary (stack protector) missing",
+                severity="HIGH",
+                description=("The binary does not contain ___stack_chk_fail / ___stack_chk_guard symbols, "
+                             "indicating stack canaries are not enabled. Stack-based buffer overflows "
+                             "become trivially exploitable without stack smashing protection."),
+                data={"catalogue_id": "QUILL-IOS-042",
+                      "affected": str(binary),
+                      "remediation": "Compile with -fstack-protector-all. Xcode enables this by default."},
+                output_file=str(out_file))
+
+    if "arc" in results and not results["arc"]:
+        finding(title="Mobile Security: ARC (Automatic Reference Counting) not enabled",
+                severity="HIGH",
+                description=("The binary does not contain _objc_release symbol, suggesting Automatic "
+                             "Reference Counting is not in use. Manual memory management increases "
+                             "the risk of use-after-free and double-free vulnerabilities."),
+                data={"catalogue_id": "QUILL-IOS-043",
+                      "affected": str(binary),
+                      "remediation": "Enable ARC in Xcode build settings (CLANG_ENABLE_OBJC_ARC=YES)."},
+                output_file=str(out_file))
+
+    if results.get("rpath"):
+        finding(title="Mobile Security: RPATH load command present in binary",
+                severity="INFO",
+                description=("The binary contains LC_RPATH load commands, which specify runtime search "
+                             "paths for dynamic libraries. On jailbroken devices this could be abused "
+                             "to load malicious dylibs via dylib hijacking."),
+                data={"catalogue_id": "QUILL-IOS-044",
+                      "affected": str(binary),
+                      "remediation": "Review RPATH entries; remove unnecessary runtime library search paths."},
+                output_file=str(out_file))
+
+    if "signed" in results and not results["signed"]:
+        finding(title="Mobile Security: Code signature missing or invalid",
+                severity="HIGH",
+                description=("The binary does not appear to be code-signed. iOS requires valid code "
+                             "signatures for execution; an unsigned binary may indicate a development "
+                             "build or tampered artifact."),
+                data={"catalogue_id": "QUILL-IOS-045",
+                      "affected": str(binary),
+                      "remediation": "Sign the binary with a valid Apple distribution certificate before release."},
+                output_file=str(out_file))
+
+    if "encrypted" in results and not results["encrypted"]:
+        finding(title="Mobile Security: Binary not encrypted (FairPlay DRM absent)",
+                severity="MEDIUM",
+                description=("The binary's LC_ENCRYPTION_INFO cryptid is 0, meaning FairPlay DRM "
+                             "encryption is not applied. The binary can be directly disassembled "
+                             "without needing to dump it from a running process."),
+                data={"catalogue_id": "QUILL-IOS-046",
+                      "affected": str(binary),
+                      "remediation": "Submit through App Store Connect which applies FairPlay encryption automatically."},
+                output_file=str(out_file))
+
+    if "symbols_stripped" in results and not results["symbols_stripped"]:
+        finding(title="Mobile Security: Debug symbols not stripped from binary",
+                severity="LOW",
+                description=("The binary contains debug symbols (nm reports significant symbol output). "
+                             "Debug symbols reveal internal class names, method names, and variable "
+                             "names, making reverse engineering substantially easier."),
+                data={"catalogue_id": "QUILL-IOS-047",
+                      "affected": str(binary),
+                      "remediation": "Strip symbols in release builds (STRIP_INSTALLED_PRODUCT=YES in Xcode)."},
+                output_file=str(out_file))
+
+    log(f"[ios_binary] iOS binary mitigation analysis complete — {len(results)} check(s) evaluated")
+    status("ios_binary", "iOS binary mitigations", "complete")
+
+
+# ── Insecure C API symbols ──
+
+_INSECURE_C_APIS = {
+    "_fopen", "_memcpy", "_memmove", "_strcat", "_strcpy", "_strncat",
+    "_strncpy", "_sprintf", "_vsprintf", "_gets", "_scanf", "_sscanf",
+    "_fscanf", "_printf", "_fprintf",
+}
+
+
+def analyse_ios_binary_code(app_dir: Path, output_dir: Path) -> None:
+    _check_pause()
+    _save_checkpoint()
+    log(f"[ios_code] Starting iOS insecure API detection for {app_dir.name}...")
+    status("ios_code", "iOS insecure API detection", "running")
+
+    nm_bin = shutil.which("nm")
+    if not nm_bin:
+        log("[ios_code] nm not available — skipping insecure API detection (macOS-only)")
+        status("ios_code", "iOS insecure API detection", "skipped")
+        return
+
+    binary = _find_ios_main_binary(app_dir)
+    if not binary:
+        err("[ios_code] Main binary not found in .app bundle")
+        status("ios_code", "iOS insecure API detection", "error")
+        return
+
+    log(f"[ios_code] Running nm -u on {binary.name} to extract undefined (imported) symbols...")
+    out_file = output_dir / "ios_insecure_apis.json"
+    undef_file = output_dir / f"{binary.name}_nm_undefined.txt"
+
+    cp = _run_tool_cmd([nm_bin, "-u", str(binary)],
+                       output_file=str(undef_file), timeout=120,
+                       tool_name="nm")
+    if cp is None:
+        status("ios_code", "iOS insecure API detection", "error")
+        return
+
+    undef_syms = cp.stdout or ""
+    undef_file.write_text(undef_syms, encoding="utf-8")
+    sym_set = set()
+    for line in undef_syms.splitlines():
+        parts = line.strip().split()
+        if parts:
+            sym_set.add(parts[-1])
+
+    log(f"[ios_code] {len(sym_set)} undefined symbol(s) extracted")
+
+    insecure_found = [s for s in sorted(_INSECURE_C_APIS) if s in sym_set]
+    has_nslog = "_NSLog" in sym_set
+    has_malloc = "_malloc" in sym_set
+    has_calloc = "_calloc" in sym_set
+
+    result = {
+        "insecure_c_apis": insecure_found,
+        "nslog_present": has_nslog,
+        "malloc_without_calloc": has_malloc and not has_calloc,
+        "total_undefined": len(sym_set),
+    }
+    out_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    _analysis_log(out_file, "iOS insecure API detection",
+                  [f"binary: {binary}",
+                   f"nm: {nm_bin}",
+                   f"undefined_symbols: {len(sym_set)}",
+                   f"insecure_c_apis_found: {len(insecure_found)}",
+                   f"nslog: {has_nslog}",
+                   f"malloc_without_calloc: {has_malloc and not has_calloc}"])
+
+    if insecure_found:
+        log(f"[ios_code] {len(insecure_found)} insecure C API(s) detected: {', '.join(insecure_found)}")
+        finding(title=f"Mobile Security: Insecure C API usage detected ({len(insecure_found)} function(s))",
+                severity="MEDIUM",
+                description=(f"The binary imports potentially dangerous C functions: "
+                             f"{', '.join(insecure_found)}. These functions are prone to buffer "
+                             f"overflows and format string vulnerabilities when used with "
+                             f"untrusted input."),
+                data={"catalogue_id": "QUILL-IOS-050",
+                      "affected": str(binary),
+                      "remediation": "Replace with safer alternatives (strlcpy, snprintf, fgets, etc.) or use Swift."},
+                output_file=str(out_file))
+
+    if has_nslog:
+        log("[ios_code] NSLog usage detected — potential sensitive info in system log")
+        finding(title="Mobile Security: NSLog usage detected in binary",
+                severity="MEDIUM",
+                description=("The binary imports NSLog, which writes to the system log accessible "
+                             "by any app on jailbroken devices and via Xcode console. Sensitive "
+                             "data (tokens, PII, internal URLs) logged via NSLog is trivially "
+                             "recoverable."),
+                data={"catalogue_id": "QUILL-IOS-051",
+                      "affected": str(binary),
+                      "remediation": "Replace NSLog with os_log with appropriate privacy levels, or use a "
+                                     "logging framework that strips logs in release builds."},
+                output_file=str(out_file))
+
+    if has_malloc and not has_calloc:
+        log("[ios_code] malloc used without calloc — allocated memory may contain stale data")
+        finding(title="Mobile Security: malloc used without calloc (uninitialized memory risk)",
+                severity="INFO",
+                description=("The binary imports malloc but not calloc. Memory allocated with "
+                             "malloc is not zero-initialized and may contain sensitive data from "
+                             "previous allocations if not explicitly cleared."),
+                data={"catalogue_id": "QUILL-IOS-052",
+                      "affected": str(binary),
+                      "remediation": "Prefer calloc over malloc, or explicitly zero memory with memset after allocation."},
+                output_file=str(out_file))
+
+    log(f"[ios_code] iOS insecure API detection complete")
+    status("ios_code", "iOS insecure API detection", "complete")
+
+
+def analyse_ios_frameworks(app_dir: Path, output_dir: Path) -> None:
+    _check_pause()
+    _save_checkpoint()
+    log(f"[ios_frameworks] Starting framework/dylib binary analysis for {app_dir.name}...")
+    status("ios_frameworks", "Framework binary analysis", "running")
+
+    otool = shutil.which("otool")
+    if not otool:
+        log("[ios_frameworks] otool not available — skipping framework analysis (macOS-only)")
+        status("ios_frameworks", "Framework binary analysis", "skipped")
+        return
+
+    fw_dir = output_dir / "framework_analysis"
+    fw_dir.mkdir(parents=True, exist_ok=True)
+
+    frameworks = list(app_dir.rglob("*.framework"))
+    dylibs = list(app_dir.rglob("*.dylib"))
+    log(f"[ios_frameworks] Found {len(frameworks)} framework(s) and {len(dylibs)} dylib(s) in bundle")
+
+    binaries_to_check: list = []
+    for fw in frameworks:
+        fw_name = fw.stem
+        fw_binary = fw / fw_name
+        if fw_binary.exists() and fw_binary.is_file():
+            binaries_to_check.append(("framework", fw_name, fw_binary))
+        else:
+            for p in fw.iterdir():
+                if p.is_file() and not p.suffix and os.access(str(p), os.X_OK):
+                    binaries_to_check.append(("framework", p.name, p))
+                    break
+
+    for dl in dylibs:
+        binaries_to_check.append(("dylib", dl.name, dl))
+
+    if not binaries_to_check:
+        log("[ios_frameworks] No framework/dylib binaries found to analyse")
+        status("ios_frameworks", "Framework binary analysis", "complete")
+        return
+
+    log(f"[ios_frameworks] Analysing {len(binaries_to_check)} binary/binaries for stack canary and ARC...")
+    out_file = output_dir / "framework_binary_analysis.json"
+    all_results = []
+    weak_count = 0
+
+    for btype, bname, bpath in binaries_to_check:
+        _check_pause()
+        log(f"[ios_frameworks] Checking {btype} {bname}...")
+        res = _check_binary_mitigations(bpath, fw_dir, label_prefix=f"fw_{bname}")
+        entry = {"type": btype, "name": bname, "path": str(bpath)}
+        entry.update(res)
+        all_results.append(entry)
+
+        weaknesses = []
+        if "stack_canary" in res and not res["stack_canary"]:
+            weaknesses.append("missing stack canary")
+        if "arc" in res and not res["arc"]:
+            weaknesses.append("ARC not enabled")
+
+        if weaknesses:
+            weak_count += 1
+            finding(title=f"Mobile Security: Framework binary weakness in {bname}: {', '.join(weaknesses)}",
+                    severity="MEDIUM",
+                    description=(f"The {btype} binary {bname} has the following security weakness(es): "
+                                 f"{', '.join(weaknesses)}. Embedded frameworks are part of the app's "
+                                 f"attack surface and should meet the same binary hardening standards "
+                                 f"as the main executable."),
+                    data={"catalogue_id": "QUILL-IOS-055",
+                          "affected": f"{bname} ({btype})",
+                          "remediation": "Rebuild the framework with stack protection (-fstack-protector-all) and ARC enabled."},
+                    output_file=str(out_file))
+
+    out_file.write_text(json.dumps(all_results, indent=2), encoding="utf-8")
+    _analysis_log(out_file, "Framework/dylib binary analysis",
+                  [f"app_dir: {app_dir}",
+                   f"frameworks: {len(frameworks)}",
+                   f"dylibs: {len(dylibs)}",
+                   f"binaries_checked: {len(binaries_to_check)}",
+                   f"weak_binaries: {weak_count}"])
+
+    log(f"[ios_frameworks] Framework binary analysis complete — {len(binaries_to_check)} checked, "
+        f"{weak_count} with weakness(es)")
+    status("ios_frameworks", "Framework binary analysis", "complete")
+
+
+# ── iOS permission enumeration ──
+
+_IOS_DANGEROUS_PERMISSIONS = {
+    "NSCameraUsageDescription",
+    "NSMicrophoneUsageDescription",
+    "NSLocationWhenInUseUsageDescription",
+    "NSLocationAlwaysUsageDescription",
+    "NSContactsUsageDescription",
+    "NSCalendarsUsageDescription",
+    "NSPhotoLibraryUsageDescription",
+    "NSHealthShareUsageDescription",
+    "NSMotionUsageDescription",
+    "NSFaceIDUsageDescription",
+}
+
+
+def analyse_ios_permissions(app_dir: Path, output_dir: Path, plist_data: dict) -> None:
+    _check_pause()
+    _save_checkpoint()
+    log(f"[ios_perms] Starting iOS permission enumeration for {app_dir.name}...")
+    status("ios_perms", "iOS permission enumeration", "running")
+
+    out_file = output_dir / "ios_permissions.json"
+    permissions_found: list = []
+
+    for key, value in plist_data.items():
+        if (key.startswith("NS") and key.endswith("UsageDescription")) or \
+           key.startswith("Privacy -"):
+            reason = str(value) if value else "(no reason provided)"
+            permissions_found.append({"key": key, "reason": reason})
+            log(f"[ios_perms] Permission: {key} — {reason[:80]}")
+
+    dangerous_found = [p for p in permissions_found
+                       if p["key"] in _IOS_DANGEROUS_PERMISSIONS]
+
+    result = {
+        "total_permissions": len(permissions_found),
+        "dangerous_count": len(dangerous_found),
+        "permissions": permissions_found,
+    }
+    out_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    _analysis_log(out_file, "iOS permission enumeration",
+                  [f"app_dir: {app_dir}",
+                   f"total_permissions: {len(permissions_found)}",
+                   f"dangerous_permissions: {len(dangerous_found)}"])
+
+    log(f"[ios_perms] {len(permissions_found)} permission(s) found, "
+        f"{len(dangerous_found)} classified as dangerous")
+
+    for p in permissions_found:
+        finding(title=f"Mobile Security: iOS permission: {p['key']}",
+                severity="INFO",
+                description=(f"The app requests {p['key']} with reason: \"{p['reason']}\". "
+                             f"Verify that this permission is necessary for the app's core functionality."),
+                data={"catalogue_id": "QUILL-IOS-070",
+                      "affected": p["key"]},
+                output_file=str(out_file))
+
+    if len(dangerous_found) > 6:
+        log(f"[ios_perms] Excessive dangerous iOS permissions ({len(dangerous_found)} > 6) — finding emitted")
+        perm_list = ", ".join(p["key"] for p in dangerous_found)
+        finding(title=f"Mobile Security: Excessive iOS permissions ({len(dangerous_found)} dangerous)",
+                severity="MEDIUM",
+                description=(f"The application requests {len(dangerous_found)} dangerous iOS "
+                             f"permissions: {perm_list}. Excessive permission requests expand "
+                             f"the attack surface and increase data exposure risk if the app "
+                             f"or its dependencies are compromised."),
+                data={"catalogue_id": "QUILL-IOS-071",
+                      "affected": perm_list,
+                      "remediation": "Review and remove unnecessary permission usage descriptions from Info.plist."},
+                output_file=str(out_file))
+
+    log("[ios_perms] iOS permission enumeration complete")
+    status("ios_perms", "iOS permission enumeration", "complete")
+
+
+# ── Android network security config deep parse ──
+
+def analyse_network_security_config(app_dir: Path, output_dir: Path) -> None:
+    _check_pause()
+    _save_checkpoint()
+    log(f"[nsc] Starting Android network security config deep parse for {app_dir.name}...")
+    status("nsc", "Network security config analysis", "running")
+
+    nsc_path = None
+    for candidate in [
+        app_dir / "res" / "xml" / "network_security_config.xml",
+        app_dir / "res" / "xml" / "network_security_configuration.xml",
+    ]:
+        if candidate.exists():
+            nsc_path = candidate
+            break
+
+    if nsc_path is None:
+        nsc_files = list(app_dir.rglob("network_security_config.xml"))
+        if nsc_files:
+            nsc_path = nsc_files[0]
+
+    if nsc_path is None:
+        log("[nsc] No network_security_config.xml found in APK — skipping")
+        status("nsc", "Network security config analysis", "skipped")
+        return
+
+    log(f"[nsc] Found network security config: {nsc_path}")
+    out_file = output_dir / "network_security_config_analysis.json"
+
+    try:
+        raw = nsc_path.read_text(encoding="utf-8", errors="ignore")
+    except Exception as exc:
+        err(f"[nsc] Failed to read network security config: {exc}")
+        status("nsc", "Network security config analysis", "error")
+        return
+
+    try:
+        tree = ET.parse(nsc_path)
+        root = tree.getroot()
+    except ET.ParseError as exc:
+        err(f"[nsc] XML parse error in network security config: {exc}")
+        status("nsc", "Network security config analysis", "error")
+        return
+
+    result = {"source": str(nsc_path), "findings": []}
+
+    base_configs = root.findall(".//base-config")
+    for bc in base_configs:
+        cleartext = bc.get("cleartextTrafficPermitted", "").lower()
+        if cleartext == "true":
+            log("[nsc] base-config allows cleartext traffic globally — finding emitted")
+            result["findings"].append("base_cleartext")
+            finding(title="Mobile Security: Network security config allows cleartext (base-config)",
+                    severity="HIGH",
+                    description=("The network_security_config.xml base-config sets "
+                                 "cleartextTrafficPermitted=true, allowing unencrypted HTTP "
+                                 "connections globally. On-path attackers can intercept or "
+                                 "modify all plaintext traffic."),
+                    data={"catalogue_id": "QUILL-APK-090",
+                          "affected": str(nsc_path),
+                          "remediation": "Set cleartextTrafficPermitted=false in base-config."},
+                    output_file=str(out_file))
+
+    domain_configs = root.findall(".//domain-config")
+    for dc in domain_configs:
+        trust_anchors = dc.findall(".//trust-anchors/certificates")
+        for cert in trust_anchors:
+            src = cert.get("src", "").lower()
+            if src == "user":
+                domains = [d.text or d.get("domain", "") for d in dc.findall(".//domain")]
+                domain_list = ", ".join(d for d in domains if d)
+                log(f"[nsc] domain-config trusts user certificates for: {domain_list}")
+                result["findings"].append(f"user_cert_trust:{domain_list}")
+                finding(title=f"Mobile Security: Domain config trusts user installed certificates",
+                        severity="HIGH",
+                        description=(f"The network security config trusts user-installed CA certificates "
+                                     f"for domain(s): {domain_list or '(unspecified)'}. An attacker who "
+                                     f"installs a rogue CA on the device can intercept HTTPS traffic "
+                                     f"to these domains."),
+                        data={"catalogue_id": "QUILL-APK-091",
+                              "affected": domain_list or str(nsc_path),
+                              "remediation": "Remove user certificates from trust-anchors; pin to specific CAs."},
+                        output_file=str(out_file))
+
+        dc_cleartext = dc.get("cleartextTrafficPermitted", "").lower()
+        if dc_cleartext == "true":
+            domains = [d.text or d.get("domain", "") for d in dc.findall(".//domain")]
+            domain_list = ", ".join(d for d in domains if d)
+            includes_subdomains = any(
+                d.get("includeSubdomains", "").lower() == "true"
+                for d in dc.findall(".//domain"))
+            scope_note = " (including subdomains)" if includes_subdomains else ""
+            log(f"[nsc] domain-config allows cleartext for: {domain_list}{scope_note}")
+            result["findings"].append(f"domain_cleartext:{domain_list}")
+            finding(title=f"Mobile Security: Domain permits cleartext traffic: {domain_list}",
+                    severity="MEDIUM",
+                    description=(f"The network security config allows cleartext HTTP for "
+                                 f"domain(s): {domain_list}{scope_note}. Traffic to these "
+                                 f"domains is subject to interception."),
+                    data={"catalogue_id": "QUILL-APK-092",
+                          "affected": domain_list or str(nsc_path),
+                          "remediation": "Migrate listed domains to HTTPS and remove cleartextTrafficPermitted."},
+                    output_file=str(out_file))
+
+    out_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    _analysis_log(out_file, "Network security config deep parse",
+                  [f"source: {nsc_path}",
+                   f"findings_count: {len(result['findings'])}"])
+
+    log(f"[nsc] Network security config analysis complete — {len(result['findings'])} issue(s)")
+    status("nsc", "Network security config analysis", "complete")
+
+
+# ── File hash computation ──
+
+def compute_file_hashes(file_path: Path, output_dir: Path) -> None:
+    _check_pause()
+    log(f"[hashes] Computing file hashes for {file_path.name}...")
+    status("hashes", "File hash computation", "running")
+
+    out_file = output_dir / "file_hashes.json"
+    if not file_path.exists():
+        err(f"[hashes] File not found: {file_path}")
+        status("hashes", "File hash computation", "error")
+        return
+
+    file_size = file_path.stat().st_size
+    log(f"[hashes] File size: {file_size / 1048576:.1f} MB — computing MD5, SHA1, SHA256...")
+
+    md5 = hashlib.md5()
+    sha1 = hashlib.sha1()
+    sha256 = hashlib.sha256()
+
+    try:
+        with open(file_path, "rb") as f:
+            while True:
+                chunk = f.read(65536)
+                if not chunk:
+                    break
+                md5.update(chunk)
+                sha1.update(chunk)
+                sha256.update(chunk)
+    except Exception as exc:
+        err(f"[hashes] Hash computation failed: {exc}")
+        status("hashes", "File hash computation", "error")
+        return
+
+    result = {
+        "file": str(file_path),
+        "file_name": file_path.name,
+        "file_size": file_size,
+        "md5": md5.hexdigest(),
+        "sha1": sha1.hexdigest(),
+        "sha256": sha256.hexdigest(),
+    }
+    out_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    _analysis_log(out_file, "File hash computation",
+                  [f"file: {file_path}",
+                   f"size: {file_size}",
+                   f"md5: {result['md5']}",
+                   f"sha1: {result['sha1']}",
+                   f"sha256: {result['sha256']}"])
+
+    log(f"[hashes] MD5:    {result['md5']}")
+    log(f"[hashes] SHA1:   {result['sha1']}")
+    log(f"[hashes] SHA256: {result['sha256']}")
+    log("[hashes] File hash computation complete")
+    status("hashes", "File hash computation", "complete")
+
+
 # ── Dynamic analysis (Frida) ─────────────────────────────────────────────────
 
 _FRIDA_SSL_PINNING_SCRIPT = """
@@ -1171,7 +1869,7 @@ def main() -> int:
             import pr0t31n_dep_snapshot as _ds
             _ds.write_snapshot(
                 project_dir, "quill", VERSION,
-                binaries=["strings", "apktool", "frida", "codesign"],
+                binaries=["strings", "apktool", "frida", "codesign", "otool", "nm"],
                 pip_packages=[],
             )
         except Exception:
@@ -1188,11 +1886,21 @@ def main() -> int:
         if not app_dir:
             return 1
         _check_pause()
-        analyse_info_plist(app_dir, project_dir)
+        plist_data = analyse_info_plist(app_dir, project_dir)
         _check_pause()
         analyse_entitlements(app_dir, project_dir)
         _check_pause()
         analyse_strings(app_dir, project_dir)
+        _check_pause()
+        analyse_ios_binary(app_dir, project_dir)
+        _check_pause()
+        analyse_ios_binary_code(app_dir, project_dir)
+        _check_pause()
+        analyse_ios_frameworks(app_dir, project_dir)
+        _check_pause()
+        analyse_ios_permissions(app_dir, project_dir, plist_data)
+        _check_pause()
+        compute_file_hashes(Path(app_path), project_dir)
     elif platform == "android":
         app_dir = extract_apk(Path(app_path), extract_dir)
         if not app_dir:
@@ -1203,6 +1911,10 @@ def main() -> int:
         analyse_permissions(app_dir, project_dir, manifest_data)
         _check_pause()
         analyse_strings_apk(app_dir, project_dir)
+        _check_pause()
+        analyse_network_security_config(app_dir, project_dir)
+        _check_pause()
+        compute_file_hashes(Path(app_path), project_dir)
 
     _check_pause()
     if args.dynamic:
