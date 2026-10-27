@@ -1814,6 +1814,1859 @@
         "frida",
         "quill"
       ]
+    },
+    {
+      "id": "QUILL-APK-100",
+      "title": "Code Analysis: WebView JavaScript enabled",
+      "aliases": [
+        "WebView setJavaScriptEnabled"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "INFO",
+      "description": "The application calls WebSettings.setJavaScriptEnabled(true), enabling JavaScript execution inside a WebView.",
+      "impact": "If the WebView loads content from untrusted sources, an attacker can inject malicious JavaScript (XSS) to steal cookies, session tokens, or local storage data and relay it to an external server.",
+      "cwe": [
+        "CWE-79"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A03:2021 Injection",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SI-10"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1059.007",
+          "tactic": "Execution",
+          "name": "JavaScript"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Disable JavaScript in WebViews that display untrusted content; validate and sanitize all data loaded via loadUrl/loadData.",
+      "remediation_component": "Application",
+      "remediation_category": "Input Validation",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apktool",
+        "jadx",
+        "MobSF"
+      ]
+    },
+    {
+      "id": "QUILL-APK-101",
+      "title": "Code Analysis: WebView file access enabled",
+      "aliases": [
+        "WebView setAllowFileAccess"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "The application calls WebSettings.setAllowFileAccess(true), allowing the WebView to read local files via file:// URIs.",
+      "impact": "Combined with JavaScript execution, an attacker exploiting an XSS vulnerability can read local app files (databases, SharedPreferences, cached credentials) via file:// and exfiltrate them.",
+      "cwe": [
+        "CWE-200"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 5.3,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A01:2021 Broken Access Control",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "AC-3"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Set setAllowFileAccess(false) unless file access is explicitly required; scope to specific paths if needed.",
+      "remediation_component": "Application",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apktool",
+        "jadx",
+        "MobSF"
+      ]
+    },
+    {
+      "id": "QUILL-APK-102",
+      "title": "Code Analysis: WebView universal file URL access",
+      "aliases": [
+        "WebView setAllowUniversalAccessFromFileURLs"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "The application calls WebSettings.setAllowUniversalAccessFromFileURLs(true), allowing file:// pages to access content from any origin.",
+      "impact": "An attacker who can write a local file (e.g. via a download or cache poisoning) can load it in the WebView and use JavaScript to read content from any other origin, including the app's own sandbox files and HTTPS endpoints.",
+      "cwe": [
+        "CWE-200"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 7.5,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A01:2021 Broken Access Control",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "AC-3"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Set setAllowUniversalAccessFromFileURLs(false) (default since API 16); never enable for production builds.",
+      "remediation_component": "Application",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apktool",
+        "jadx",
+        "MobSF"
+      ]
+    },
+    {
+      "id": "QUILL-APK-103",
+      "title": "Code Analysis: JavaScript interface exposed",
+      "aliases": [
+        "WebView addJavascriptInterface"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "The application calls WebView.addJavascriptInterface(), exposing a Java object to JavaScript running inside the WebView.",
+      "impact": "On API < 17, ALL public methods of the exposed object are callable from JavaScript, enabling arbitrary code execution via reflection. On API >= 17, only @JavascriptInterface methods are exposed, but bridge calls still execute with the app's full permissions.",
+      "cwe": [
+        "CWE-749"
+      ],
+      "cve_examples": [
+        "CVE-2012-6636"
+      ],
+      "cvss_v3_base": 6.1,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A03:2021 Injection",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SI-10"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1059.007",
+          "tactic": "Execution",
+          "name": "JavaScript"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Limit exposed methods; validate all input from JavaScript bridge calls; require minSdkVersion >= 17.",
+      "remediation_component": "Application",
+      "remediation_category": "Input Validation",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "apktool",
+        "jadx",
+        "MobSF"
+      ]
+    },
+    {
+      "id": "QUILL-APK-104",
+      "title": "Code Analysis: WebView debugging enabled",
+      "aliases": [
+        "WebView setWebContentsDebuggingEnabled"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "The application enables WebView remote debugging via WebView.setWebContentsDebuggingEnabled(true).",
+      "impact": "On a rooted/USB-debuggable device, Chrome DevTools can connect to the WebView to inspect page content, execute arbitrary JavaScript, intercept network traffic, and extract sensitive data displayed in the WebView.",
+      "cwe": [
+        "CWE-489"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 7.1,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "CM-7"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "6.2.2"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Disable setWebContentsDebuggingEnabled in release builds; guard with BuildConfig.DEBUG check.",
+      "remediation_component": "Application",
+      "remediation_category": "Configuration",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apktool",
+        "jadx",
+        "MobSF"
+      ]
+    },
+    {
+      "id": "QUILL-APK-105",
+      "title": "Code Analysis: Runtime.exec() command execution",
+      "aliases": [
+        "Runtime exec",
+        "shell command execution"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "The application invokes java.lang.Runtime.exec() to execute a system command.",
+      "impact": "If user-controlled or externally influenced data reaches the command argument without sanitization, an attacker can inject arbitrary shell commands for execution with the app's UID and permissions.",
+      "cwe": [
+        "CWE-78"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 8.1,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A03:2021 Injection",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SI-10"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "6.2.4"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1059",
+          "tactic": "Execution",
+          "name": "Command and Scripting Interpreter"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Avoid Runtime.exec(); if required, use fixed command strings with no user input concatenation.",
+      "remediation_component": "Application",
+      "remediation_category": "Input Validation",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "apktool",
+        "jadx",
+        "MobSF"
+      ]
+    },
+    {
+      "id": "QUILL-APK-106",
+      "title": "Code Analysis: ProcessBuilder command execution",
+      "aliases": [
+        "ProcessBuilder"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "The application uses java.lang.ProcessBuilder to execute system commands.",
+      "impact": "Same as Runtime.exec() \u2014 if attacker-controlled data influences the command or arguments, arbitrary command injection is possible.",
+      "cwe": [
+        "CWE-78"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 8.1,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A03:2021 Injection",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SI-10"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "6.2.4"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1059",
+          "tactic": "Execution",
+          "name": "Command and Scripting Interpreter"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Avoid ProcessBuilder; if required, use fixed command strings without user input.",
+      "remediation_component": "Application",
+      "remediation_category": "Input Validation",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "apktool",
+        "jadx",
+        "MobSF"
+      ]
+    },
+    {
+      "id": "QUILL-APK-107",
+      "title": "Code Analysis: Weak cryptographic algorithm",
+      "aliases": [
+        "ECB mode",
+        "DES cipher",
+        "weak crypto"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "The application uses a known-weak cryptographic algorithm or mode (ECB, DES, 3DES) via javax.crypto.Cipher.getInstance().",
+      "impact": "ECB mode leaks patterns in encrypted data; DES provides only 56-bit key strength. An attacker can exploit these weaknesses to decrypt stored secrets, authentication tokens, or user data.",
+      "cwe": [
+        "CWE-327"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 7.5,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A02:2021 Cryptographic Failures",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SC-12",
+        "SC-13"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "6.2.4"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Use AES-256 with GCM or CBC mode and proper IV management; avoid ECB mode and DES/3DES entirely.",
+      "remediation_component": "Application",
+      "remediation_category": "Cryptography",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "apktool",
+        "jadx",
+        "MobSF"
+      ]
+    },
+    {
+      "id": "QUILL-APK-108",
+      "title": "Code Analysis: SecureRandom seeded predictably",
+      "aliases": [
+        "SecureRandom setSeed"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "The application calls SecureRandom.setSeed(), which on certain Android versions can replace OS entropy with a developer-supplied (possibly predictable) seed.",
+      "impact": "A predictable random number generator can allow an attacker to predict session tokens, encryption keys, nonces, or OTPs, leading to authentication bypass or data decryption.",
+      "cwe": [
+        "CWE-330"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 5.9,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A02:2021 Cryptographic Failures",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SC-13"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Do not call setSeed(); let the default constructor provide OS entropy. Use new SecureRandom() directly.",
+      "remediation_component": "Application",
+      "remediation_category": "Cryptography",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apktool",
+        "jadx"
+      ]
+    },
+    {
+      "id": "QUILL-APK-109",
+      "title": "Code Analysis: Direct SQL query construction",
+      "aliases": [
+        "rawQuery",
+        "execSQL",
+        "SQL injection"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "The application constructs SQL queries directly via SQLiteDatabase.rawQuery() or execSQL() with a String argument rather than parameterized queries.",
+      "impact": "If user input is concatenated into the SQL string, an attacker can inject arbitrary SQL to read, modify, or delete database contents, bypassing authentication or exfiltrating stored secrets.",
+      "cwe": [
+        "CWE-89"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 6.5,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A03:2021 Injection",
+      "owasp_api": "API8:2023 Security Misconfiguration",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SI-10"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "6.2.4"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Use parameterized queries (selectionArgs in rawQuery, bindArgs in execSQL) instead of string concatenation.",
+      "remediation_component": "Application",
+      "remediation_category": "Input Validation",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "apktool",
+        "jadx",
+        "MobSF"
+      ]
+    },
+    {
+      "id": "QUILL-APK-110",
+      "title": "Code Analysis: World-readable/writable file mode",
+      "aliases": [
+        "MODE_WORLD_READABLE",
+        "MODE_WORLD_WRITABLE"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "The application creates files with MODE_WORLD_READABLE or MODE_WORLD_WRITABLE, making them accessible to all apps on the device.",
+      "impact": "Any app on the device can read (or write) the file. If the file contains credentials, tokens, or personal data, an attacker's app can silently exfiltrate it. Writable files allow data injection or tampering.",
+      "cwe": [
+        "CWE-276"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 7.1,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A01:2021 Broken Access Control",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "AC-3"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1552.001",
+          "tactic": "Credential Access",
+          "name": "Credentials In Files"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Use MODE_PRIVATE for all file creation; share data between apps via ContentProviders with proper permissions.",
+      "remediation_component": "Application",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apktool",
+        "jadx",
+        "MobSF"
+      ]
+    },
+    {
+      "id": "QUILL-APK-111",
+      "title": "Code Analysis: Hostname verifier bypass",
+      "aliases": [
+        "ALLOW_ALL_HOSTNAME_VERIFIER",
+        "setDefaultHostnameVerifier"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "The application overrides or disables SSL hostname verification using ALLOW_ALL_HOSTNAME_VERIFIER or a custom HostnameVerifier that accepts all hostnames.",
+      "impact": "An attacker with a valid certificate for ANY domain can perform a man-in-the-middle attack against the app's HTTPS connections. All traffic can be intercepted even though TLS is nominally in use.",
+      "cwe": [
+        "CWE-295"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 7.4,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A02:2021 Cryptographic Failures",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SC-8",
+        "SC-23"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "4.2.1"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1557",
+          "tactic": "Credential Access",
+          "name": "Adversary-in-the-Middle"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Use the default HostnameVerifier; do not override with ALLOW_ALL or a permissive custom verifier.",
+      "remediation_component": "Application",
+      "remediation_category": "Cryptography",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apktool",
+        "jadx",
+        "MobSF"
+      ]
+    },
+    {
+      "id": "QUILL-APK-112",
+      "title": "Code Analysis: Data written to clipboard",
+      "aliases": [
+        "ClipboardManager setPrimaryClip"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "INFO",
+      "description": "The application writes data to the system clipboard via ClipboardManager.setPrimaryClip().",
+      "impact": "On Android < 10 (API 29), any app can read the clipboard at any time without user interaction. If the app copies passwords, tokens, or PII, a malicious background app can harvest them silently.",
+      "cwe": [
+        "CWE-200"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Avoid writing sensitive data to the clipboard; if necessary, clear it after a short timeout.",
+      "remediation_component": "Application",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apktool",
+        "jadx"
+      ]
+    },
+    {
+      "id": "QUILL-APK-113",
+      "title": "Code Analysis: Excessive logging",
+      "aliases": [
+        "android.util.Log",
+        "verbose logging"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "The application contains an excessive number of android.util.Log calls (debug, verbose, info, error), indicating verbose logging in the release build.",
+      "impact": "Log output is written to logcat, which on rooted devices or via ADB is readable by any process. Sensitive data (tokens, credentials, PII, internal URLs, error details) logged at any level can be captured by an attacker.",
+      "cwe": [
+        "CWE-532"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 4.3,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "AU-9"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [
+        "3.4.1"
+      ],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Remove or guard verbose/debug logging in release builds; use ProGuard/R8 rules to strip Log.d/v/i calls.",
+      "remediation_component": "Application",
+      "remediation_category": "Configuration",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "apktool",
+        "jadx",
+        "MobSF"
+      ]
+    },
+    {
+      "id": "QUILL-APK-120",
+      "title": "Third-party tracker SDK detected: {tracker_name}",
+      "aliases": [
+        "tracker",
+        "analytics SDK"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "INFO",
+      "description": "The APK bundles a known third-party tracker or analytics SDK, identified by its package path in the DEX/smali code.",
+      "impact": "Tracker SDKs collect user behaviour data (screen views, events, device identifiers) and transmit it to external servers. This may violate user privacy expectations and regulatory requirements (GDPR, CCPA) if consent is not properly obtained.",
+      "cwe": [
+        "CWE-359"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [
+        "Art. 6",
+        "Art. 7"
+      ],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Audit tracker SDKs for data collection scope; ensure user consent is obtained; provide opt-out mechanisms.",
+      "remediation_component": "Application",
+      "remediation_category": "Configuration",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "apktool",
+        "Exodus Privacy"
+      ]
+    },
+    {
+      "id": "QUILL-APK-121",
+      "title": "Excessive third-party trackers detected ({count})",
+      "aliases": [
+        "tracker count"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "LOW",
+      "description": "The APK bundles more than 5 distinct third-party tracker or analytics SDKs.",
+      "impact": "Each tracker SDK collects and transmits user data independently, compounding privacy exposure. Multiple trackers increase the attack surface (each is a dependency that may have vulnerabilities) and the volume of data leaving the device.",
+      "cwe": [
+        "CWE-359"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 3.3,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [
+        "Art. 5"
+      ],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Review and remove unnecessary tracker SDKs; consolidate analytics to the fewest providers that meet business requirements.",
+      "remediation_component": "Application",
+      "remediation_category": "Configuration",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "apktool",
+        "Exodus Privacy"
+      ]
+    },
+    {
+      "id": "QUILL-APK-125",
+      "title": "Protection: Anti-debug mechanism detected",
+      "aliases": [
+        "anti-debug",
+        "isDebuggerConnected",
+        "ptrace"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "INFO",
+      "description": "The app implements anti-debugging checks (e.g. isDebuggerConnected(), ptrace self-trace) to detect runtime analysis.",
+      "impact": "Anti-debug mechanisms are a positive security control that makes dynamic analysis harder for attackers. Their presence indicates the developer has invested in runtime integrity protection.",
+      "cwe": [],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SI-7"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "No remediation needed \u2014 this is a positive security control. Consider strengthening with multi-layered detection.",
+      "remediation_component": "Application",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apkid",
+        "frida"
+      ]
+    },
+    {
+      "id": "QUILL-APK-126",
+      "title": "Protection: Anti-emulator detection found",
+      "aliases": [
+        "anti-VM",
+        "emulator detection"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "INFO",
+      "description": "The app checks for emulator/virtual-machine indicators (Build.FINGERPRINT, Build.MODEL, goldfish, generic) to detect analysis environments.",
+      "impact": "Anti-emulator checks are a positive security control that prevents automated analysis in emulators. Their presence indicates the developer is protecting against sandbox-based malware analysis or dynamic testing.",
+      "cwe": [],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SI-7"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "No remediation needed \u2014 this is a positive security control.",
+      "remediation_component": "Application",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apkid",
+        "frida"
+      ]
+    },
+    {
+      "id": "QUILL-APK-127",
+      "title": "Protection: Packer/obfuscator detected: {name}",
+      "aliases": [
+        "DexGuard",
+        "ProGuard",
+        "R8",
+        "packer"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "INFO",
+      "description": "The APK is protected by a code packer or obfuscator (e.g. DexGuard, Bangcle, ProGuard/R8, Tencent, Secneo).",
+      "impact": "Packers and obfuscators make reverse engineering harder and slow down attackers. Their presence is a positive indicator of investment in intellectual property protection and anti-tampering.",
+      "cwe": [],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "No remediation needed \u2014 this is a positive security control.",
+      "remediation_component": "Application",
+      "remediation_category": "Configuration",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apkid"
+      ]
+    },
+    {
+      "id": "QUILL-APK-128",
+      "title": "Protection: No code obfuscation detected",
+      "aliases": [
+        "missing obfuscation",
+        "no ProGuard"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "LOW",
+      "description": "The APK does not appear to use code obfuscation (no ProGuard/R8 mapping, no known packer signatures, readable class and method names).",
+      "impact": "Without obfuscation, an attacker can decompile the APK (via jadx or apktool) and read the source code almost as clearly as the original, making it trivial to discover business logic, API endpoints, hardcoded secrets, and vulnerability patterns.",
+      "cwe": [
+        "CWE-693"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 3.3,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Enable ProGuard/R8 in the release build configuration; consider DexGuard or similar commercial obfuscators for sensitive applications.",
+      "remediation_component": "Application",
+      "remediation_category": "Configuration",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "apkid",
+        "jadx"
+      ]
+    },
+    {
+      "id": "QUILL-APK-130",
+      "title": "Firebase Realtime Database URL exposed",
+      "aliases": [
+        "firebaseio.com"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "A Firebase Realtime Database URL (*.firebaseio.com) was found in the APK. If database security rules are misconfigured, the database may be publicly readable or writable.",
+      "impact": "An attacker can attempt to access the Firebase database directly from a browser or tool. If rules allow unauthenticated reads, all stored data (user records, messages, configurations) is exposed. If writes are allowed, the attacker can inject or delete data.",
+      "cwe": [
+        "CWE-200"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 6.5,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A01:2021 Broken Access Control",
+      "owasp_api": "API1:2023 Broken Object Level Authorization",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "AC-3"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1530",
+          "tactic": "Collection",
+          "name": "Data from Cloud Storage"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Enforce Firebase Security Rules requiring authentication for all reads and writes; use role-based access control.",
+      "remediation_component": "Configuration",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "curl",
+        "quill"
+      ]
+    },
+    {
+      "id": "QUILL-APK-131",
+      "title": "Firebase Storage URL exposed",
+      "aliases": [
+        "firebasestorage.googleapis.com"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "A Firebase Cloud Storage URL (firebasestorage.googleapis.com) was found in the APK.",
+      "impact": "If storage security rules are misconfigured, an attacker can list, download, or upload files to the bucket without authentication, potentially accessing user-uploaded content or injecting malicious files.",
+      "cwe": [
+        "CWE-200"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 5.3,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A01:2021 Broken Access Control",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "AC-3"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1530",
+          "tactic": "Collection",
+          "name": "Data from Cloud Storage"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Enforce Firebase Storage security rules requiring authentication; restrict file types and sizes; use per-user storage paths.",
+      "remediation_component": "Configuration",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "curl",
+        "quill"
+      ]
+    },
+    {
+      "id": "QUILL-APK-132",
+      "title": "Firebase configuration file (google-services.json) present",
+      "aliases": [
+        "google-services.json"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "INFO",
+      "description": "The APK contains a google-services.json (or GoogleService-Info.plist) file with Firebase project configuration, including project ID, API key, and storage bucket.",
+      "impact": "While the API key alone cannot authenticate, the configuration reveals the Firebase project ID and bucket names, enabling targeted probing of database rules and storage permissions.",
+      "cwe": [
+        "CWE-200"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Ensure Firebase security rules are properly configured; restrict API key usage via Google Cloud Console.",
+      "remediation_component": "Configuration",
+      "remediation_category": "Configuration",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "quill"
+      ]
+    },
+    {
+      "id": "QUILL-APK-133",
+      "title": "Firebase Remote Config usage detected",
+      "aliases": [
+        "Firebase Remote Config"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "INFO",
+      "description": "The APK references Firebase Remote Config classes, indicating the app fetches configuration values from Firebase at runtime.",
+      "impact": "Remote Config values can influence app behaviour. If the Firebase project is compromised, an attacker could modify remote config to change app behaviour, redirect traffic, or enable hidden features.",
+      "cwe": [],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Validate remote config values on the client before acting on them; use Firebase App Check to restrict access.",
+      "remediation_component": "Application",
+      "remediation_category": "Input Validation",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "quill"
+      ]
+    },
+    {
+      "id": "QUILL-APK-140",
+      "title": "APK uses only JAR signing (v1) \u2014 Janus vulnerability",
+      "aliases": [
+        "Janus",
+        "CVE-2017-13156",
+        "v1 only signing"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "The APK is signed only with the v1 (JAR) scheme and lacks v2/v3 APK Signature Scheme protection, making it vulnerable to the Janus vulnerability (CVE-2017-13156).",
+      "impact": "An attacker can prepend a DEX file to a v1-only-signed APK. Android's installer verifies v1 (which only checks the ZIP entries) while the runtime loads the prepended DEX. This allows code injection into a legitimately signed app without breaking the signature.",
+      "cwe": [
+        "CWE-347"
+      ],
+      "cve_examples": [
+        "CVE-2017-13156"
+      ],
+      "cvss_v3_base": 7.8,
+      "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SI-7"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1398",
+          "tactic": "Persistence",
+          "name": "Modify OS Kernel or Boot Partition"
+        }
+      ],
+      "searchsploit_terms": [
+        "janus android"
+      ],
+      "metasploit_modules": [],
+      "kev": true,
+      "remediation_brief": "Enable APK Signature Scheme v2 (and v3 if targeting API 28+) in your build configuration; both v1+v2 should be enabled for backward compatibility.",
+      "remediation_component": "Configuration",
+      "remediation_category": "Configuration",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apksigner"
+      ]
+    },
+    {
+      "id": "QUILL-APK-141",
+      "title": "APK certificate uses weak signing algorithm",
+      "aliases": [
+        "SHA1withRSA",
+        "MD5withRSA",
+        "weak signing"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "The APK signing certificate uses a weak hash algorithm (SHA1withRSA, MD5withRSA) that is vulnerable to collision attacks.",
+      "impact": "A weak signing hash allows an attacker to potentially generate a second certificate with the same hash, enabling signature forgery. While practical collision attacks against SHA-1 have been demonstrated, exploiting this in APK signing is complex but feasible for a resourced attacker.",
+      "cwe": [
+        "CWE-327"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 5.3,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "A02:2021 Cryptographic Failures",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SC-12",
+        "SC-13"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Re-sign the APK with a certificate using SHA256withRSA or SHA384withRSA.",
+      "remediation_component": "Configuration",
+      "remediation_category": "Cryptography",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "apksigner",
+        "keytool"
+      ]
+    },
+    {
+      "id": "QUILL-APK-142",
+      "title": "APK signing certificate expired or expiring soon",
+      "aliases": [
+        "certificate expiry"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "The APK signing certificate has expired or will expire within 90 days.",
+      "impact": "An expired certificate prevents app updates from being installed through the Play Store or sideloading, as Android requires consistent signing across versions. The developer may be forced to issue a new signing identity, breaking update paths for existing users.",
+      "cwe": [
+        "CWE-324"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 4.3,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Generate a new signing certificate with a long validity period (25+ years is standard for Android); use Play App Signing for key management.",
+      "remediation_component": "Configuration",
+      "remediation_category": "Configuration",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "apksigner",
+        "keytool"
+      ]
+    },
+    {
+      "id": "QUILL-APK-143",
+      "title": "APK signed with debug certificate",
+      "aliases": [
+        "debug certificate",
+        "CN=Android Debug"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "HIGH",
+      "description": "The APK is signed with an Android debug certificate (CN=Android Debug, typically from ~/.android/debug.keystore), which is a default keystore shared across developer machines.",
+      "impact": "The debug keystore password is publicly known (\"android\"). Any developer can sign an app with the same debug key and produce a matching package signature. This allows an attacker to create a malicious update that Android's installer accepts as legitimate.",
+      "cwe": [
+        "CWE-489"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 8.1,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "CM-7",
+        "IA-5"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1036",
+          "tactic": "Defense Evasion",
+          "name": "Masquerading"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Sign release builds with a dedicated release keystore; never distribute debug-signed APKs outside development.",
+      "remediation_component": "Configuration",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apksigner",
+        "keytool"
+      ]
+    },
+    {
+      "id": "QUILL-APK-144",
+      "title": "APK signing information",
+      "aliases": [
+        "signing details"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "INFO",
+      "description": "Summary of the APK signing certificate details including Common Name, organization, validity period, key algorithm, and which APK Signature Scheme versions are present.",
+      "impact": "Informational. The signing certificate details are used to evaluate the overall signing posture of the application.",
+      "cwe": [],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Review certificate details for appropriate key length (RSA 2048+), algorithm (SHA256+), and validity period.",
+      "remediation_component": "Configuration",
+      "remediation_category": "Configuration",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apksigner",
+        "keytool"
+      ]
+    },
+    {
+      "id": "QUILL-APK-150",
+      "title": "Browsable activity with deep link: {activity_name}",
+      "aliases": [
+        "deep link",
+        "browsable intent",
+        "app link"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "INFO",
+      "description": "An activity declares an intent filter with the BROWSABLE category, registering a deep link scheme (custom scheme:// or https:// App Link) that can be invoked from a browser or another app.",
+      "impact": "Deep links allow external invocation of specific app screens. If the receiving activity does not validate parameters, an attacker can craft a malicious link that triggers unintended actions (account linking, data display, state changes) when the user clicks it.",
+      "cwe": [
+        "CWE-939"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "SI-10"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1416",
+          "tactic": "Privilege Escalation",
+          "name": "URI Hijacking"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Validate all deep link parameters; require re-authentication for sensitive actions; prefer App Links (verified HTTPS) over custom schemes.",
+      "remediation_component": "Application",
+      "remediation_category": "Input Validation",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "apktool",
+        "drozer"
+      ]
+    },
+    {
+      "id": "QUILL-APK-151",
+      "title": "Unprotected browsable activity: {activity_name}",
+      "aliases": [
+        "unprotected deep link"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "MEDIUM",
+      "description": "A browsable activity is exported without a custom permission, meaning any app or web page can invoke it with arbitrary parameters via its deep link.",
+      "impact": "An attacker can craft a link (in a phishing email, web page, or malicious app) that opens the unprotected activity with attacker-controlled parameters. This can be used to bypass navigation flows, inject data into forms, or trigger privileged operations without user consent.",
+      "cwe": [
+        "CWE-939"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": 5.3,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "AC-3",
+        "SI-10"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1416",
+          "tactic": "Privilege Escalation",
+          "name": "URI Hijacking"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Validate all incoming Intent data; require user confirmation for sensitive actions; use App Links with digital asset verification.",
+      "remediation_component": "Application",
+      "remediation_category": "Input Validation",
+      "remediation_effort": "Moderate",
+      "validation_tools": [
+        "apktool",
+        "drozer"
+      ]
+    },
+    {
+      "id": "QUILL-APK-160",
+      "title": "Behaviour: SMS sending capability",
+      "aliases": [
+        "SmsManager",
+        "sendTextMessage"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "INFO",
+      "description": "The app uses SmsManager API (sendTextMessage/sendMultipartTextMessage) and declares the SEND_SMS permission, giving it the ability to send SMS messages programmatically.",
+      "impact": "If the app is compromised, the SMS capability can be used to send premium-rate messages (billing fraud), exfiltrate data via SMS, or participate in SMS-based social engineering campaigns \u2014 all transparent to the user.",
+      "cwe": [
+        "CWE-250"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "AC-6"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [
+        {
+          "technique": "T1582",
+          "tactic": "Collection",
+          "name": "SMS Control"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Verify SMS capability is justified by core functionality; remove SEND_SMS permission if not essential.",
+      "remediation_component": "Application",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apktool",
+        "jadx"
+      ]
+    },
+    {
+      "id": "QUILL-APK-161",
+      "title": "Behaviour: Phone call initiation capability",
+      "aliases": [
+        "ACTION_CALL",
+        "CALL_PHONE"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "INFO",
+      "description": "The app uses Intent.ACTION_CALL or TelecomManager APIs with the CALL_PHONE permission, allowing it to initiate phone calls without user interaction via the dialer.",
+      "impact": "A compromised app with direct call capability can silently dial premium-rate numbers (billing fraud) or be used for harassment. ACTION_CALL bypasses the dialer UI entirely.",
+      "cwe": [
+        "CWE-250"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "AC-6"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [],
+      "mitre_attack": [],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Use ACTION_DIAL instead of ACTION_CALL to require user confirmation; remove CALL_PHONE permission if not essential.",
+      "remediation_component": "Application",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apktool",
+        "jadx"
+      ]
+    },
+    {
+      "id": "QUILL-APK-162",
+      "title": "Behaviour: Contact access capability",
+      "aliases": [
+        "ContactsContract",
+        "READ_CONTACTS"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "INFO",
+      "description": "The app accesses the contacts database (ContactsContract provider) with READ_CONTACTS or WRITE_CONTACTS permission.",
+      "impact": "Contact data is highly sensitive PII. A compromised app with contacts access can exfiltrate the user's entire address book (names, phone numbers, emails, photos), which is a common technique used by spyware and social engineering platforms.",
+      "cwe": [
+        "CWE-359"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "AC-6"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [
+        "Art. 6"
+      ],
+      "mitre_attack": [
+        {
+          "technique": "T1636.003",
+          "tactic": "Collection",
+          "name": "Contact List"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Verify contacts access is justified; remove READ_CONTACTS/WRITE_CONTACTS if not essential; minimize data read.",
+      "remediation_component": "Application",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apktool",
+        "jadx"
+      ]
+    },
+    {
+      "id": "QUILL-APK-163",
+      "title": "Behaviour: Location tracking capability",
+      "aliases": [
+        "requestLocationUpdates",
+        "FusedLocationProviderClient"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "INFO",
+      "description": "The app actively tracks the user's location via requestLocationUpdates, getLastKnownLocation, or FusedLocationProviderClient with fine or coarse location permissions.",
+      "impact": "Location data reveals the user's physical movements, home and work addresses, and daily patterns. A compromised app with location tracking can surveil the user in real time or build a historical location profile.",
+      "cwe": [
+        "CWE-359"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "AC-6"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [
+        "Art. 6",
+        "Art. 9"
+      ],
+      "mitre_attack": [
+        {
+          "technique": "T1430",
+          "tactic": "Collection",
+          "name": "Location Tracking"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Verify location tracking is justified; use coarse location when fine is not needed; minimize tracking duration; remove if not essential.",
+      "remediation_component": "Application",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apktool",
+        "jadx"
+      ]
+    },
+    {
+      "id": "QUILL-APK-164",
+      "title": "Behaviour: Camera capture capability",
+      "aliases": [
+        "CAMERA",
+        "CameraManager"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "INFO",
+      "description": "The app accesses the device camera via Camera API, CameraManager, or ACTION_IMAGE_CAPTURE with the CAMERA permission.",
+      "impact": "A compromised app with camera access can silently capture photos or video of the user's surroundings, constituting covert surveillance. This is a high-sensitivity permission often targeted by spyware.",
+      "cwe": [
+        "CWE-359"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "AC-6"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [
+        "Art. 6"
+      ],
+      "mitre_attack": [
+        {
+          "technique": "T1512",
+          "tactic": "Collection",
+          "name": "Video Capture"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Verify camera access is justified; remove CAMERA permission if not essential; use ACTION_IMAGE_CAPTURE for one-shot photos.",
+      "remediation_component": "Application",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apktool",
+        "jadx"
+      ]
+    },
+    {
+      "id": "QUILL-APK-165",
+      "title": "Behaviour: Audio recording capability",
+      "aliases": [
+        "RECORD_AUDIO",
+        "MediaRecorder",
+        "AudioRecord"
+      ],
+      "source_tools": [
+        "quill"
+      ],
+      "risk": "INFO",
+      "description": "The app uses MediaRecorder, AudioRecord, or similar APIs with the RECORD_AUDIO permission, giving it the ability to capture audio from the device microphone.",
+      "impact": "A compromised app with audio recording capability can silently record conversations, meetings, and ambient audio, constituting covert surveillance. This is among the most sensitive permissions on mobile devices.",
+      "cwe": [
+        "CWE-359"
+      ],
+      "cve_examples": [],
+      "cvss_v3_base": null,
+      "cvss_vector": "",
+      "nessus_plugin_ids": [],
+      "qualys_qids": [],
+      "owasp_web": "",
+      "owasp_api": "",
+      "nist_csf2": [],
+      "nist_800_53": [
+        "AC-6"
+      ],
+      "nist_800_171": [],
+      "pci_dss_4": [],
+      "iso_27001": [],
+      "iso_27002": [],
+      "soc2": [],
+      "hitrust": [],
+      "gdpr": [
+        "Art. 6"
+      ],
+      "mitre_attack": [
+        {
+          "technique": "T1429",
+          "tactic": "Collection",
+          "name": "Audio Capture"
+        }
+      ],
+      "searchsploit_terms": [],
+      "metasploit_modules": [],
+      "kev": false,
+      "remediation_brief": "Verify audio recording is justified; remove RECORD_AUDIO permission if not essential; consider push-to-talk patterns to limit recording duration.",
+      "remediation_component": "Application",
+      "remediation_category": "Access Control",
+      "remediation_effort": "Easy",
+      "validation_tools": [
+        "apktool",
+        "jadx"
+      ]
     }
   ]
 }

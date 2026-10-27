@@ -1441,6 +1441,997 @@ def analyse_network_security_config(app_dir: Path, output_dir: Path) -> None:
     status("nsc", "Network security config analysis", "complete")
 
 
+# ── Android SAST code analysis ───────────────────────────────────────────────
+
+_SAST_PATTERNS = [
+    (re.compile(r"setJavaScriptEnabled\s*\(\s*true\s*\)"),
+     "WebView JavaScript enabled", "MEDIUM", "QUILL-APK-100",
+     "WebView has JavaScript enabled via setJavaScriptEnabled(true). "
+     "JavaScript execution in a WebView expands the attack surface to "
+     "XSS, script injection, and bridge exploitation.",
+     "Disable JavaScript unless explicitly required; use addJavascriptInterface "
+     "only with @JavascriptInterface annotation on API 17+."),
+    (re.compile(r"setAllowFileAccess\s*\(\s*true\s*\)"),
+     "WebView file access enabled", "MEDIUM", "QUILL-APK-101",
+     "WebView allows file:// URI access via setAllowFileAccess(true). "
+     "An attacker who controls WebView content can read local files.",
+     "Set setAllowFileAccess(false) and load content via HTTPS or assets."),
+    (re.compile(r"setAllowUniversalAccessFromFileURLs\s*\(\s*true\s*\)"),
+     "WebView universal file URL access", "HIGH", "QUILL-APK-102",
+     "WebView allows universal access from file URLs. This permits "
+     "JavaScript in a file:// context to access content from any origin, "
+     "enabling local file exfiltration.",
+     "Set setAllowUniversalAccessFromFileURLs(false)."),
+    (re.compile(r"addJavascriptInterface\s*\("),
+     "JavaScript interface exposed to WebView", "MEDIUM", "QUILL-APK-103",
+     "A Java object is exposed to WebView JavaScript via addJavascriptInterface. "
+     "On API < 17 all public methods are accessible; on API 17+ only "
+     "@JavascriptInterface-annotated methods are exposed.",
+     "Ensure minSdkVersion >= 17 and annotate only safe methods with "
+     "@JavascriptInterface. Validate all input from JavaScript."),
+    (re.compile(r"setWebContentsDebuggingEnabled\s*\(\s*true\s*\)"),
+     "WebView remote debugging enabled", "HIGH", "QUILL-APK-104",
+     "WebView remote debugging is enabled in the application. An attacker "
+     "with USB or network access can inspect and manipulate WebView content "
+     "via Chrome DevTools.",
+     "Disable setWebContentsDebuggingEnabled in release builds."),
+    (re.compile(r"Runtime\.getRuntime\(\)\.exec\s*\("),
+     "Runtime.exec() command execution", "HIGH", "QUILL-APK-105",
+     "The application uses Runtime.exec() to execute system commands. "
+     "If any argument is derived from user input, this enables arbitrary "
+     "command injection.",
+     "Avoid Runtime.exec() with user-controlled input. Use ProcessBuilder "
+     "with explicit argument lists if shell execution is required."),
+    (re.compile(r"new\s+ProcessBuilder\s*\("),
+     "ProcessBuilder command execution", "MEDIUM", "QUILL-APK-106",
+     "The application uses ProcessBuilder to execute system commands. "
+     "Verify that command arguments are not derived from untrusted input.",
+     "Validate and sanitize all ProcessBuilder arguments. Prefer Android "
+     "APIs over shell commands."),
+    (re.compile(r"Cipher\.getInstance\s*\(\s*[\"'](?:[^\"']*(?:ECB|DES/))"),
+     "Weak cryptographic algorithm (ECB/DES)", "HIGH", "QUILL-APK-107",
+     "The application uses a weak cryptographic algorithm (ECB mode or DES). "
+     "ECB mode leaks plaintext patterns; DES has a 56-bit key trivially "
+     "brute-forced on modern hardware.",
+     "Use AES/GCM/NoPadding or AES/CBC/PKCS5Padding with a random IV. "
+     "Replace DES with AES-256."),
+    (re.compile(r"SecureRandom\s*\(\s*\).*?\.setSeed\s*\(|\.setSeed\s*\(.*SecureRandom"),
+     "SecureRandom seeded with predictable value", "MEDIUM", "QUILL-APK-108",
+     "SecureRandom.setSeed() is called, which on some Android versions "
+     "replaces the OS entropy source with a potentially predictable seed, "
+     "weakening all subsequent random output.",
+     "Do not call setSeed() on SecureRandom. The default OS-seeded PRNG "
+     "is cryptographically strong."),
+    (re.compile(r"(?:rawQuery|execSQL)\s*\("),
+     "Direct SQL query execution", "MEDIUM", "QUILL-APK-109",
+     "The application uses rawQuery() or execSQL() which may concatenate "
+     "user input into SQL strings, enabling SQL injection against the "
+     "local SQLite database.",
+     "Use parameterized queries (selectionArgs) or Room DAO instead of "
+     "string concatenation in SQL statements."),
+    (re.compile(r"MODE_WORLD_(?:READABLE|WRITABLE)"),
+     "World-readable/writable file mode", "HIGH", "QUILL-APK-110",
+     "The application creates files with MODE_WORLD_READABLE or "
+     "MODE_WORLD_WRITABLE. Any app on the device can read or modify "
+     "these files, exposing sensitive data.",
+     "Use MODE_PRIVATE for SharedPreferences and internal files. Share "
+     "data via ContentProvider with proper permissions."),
+    (re.compile(r"ALLOW_ALL_HOSTNAME_VERIFIER|AllowAllHostnameVerifier"),
+     "Hostname verification bypass", "HIGH", "QUILL-APK-111",
+     "The application disables hostname verification, allowing any "
+     "certificate to be accepted regardless of the hostname. This "
+     "enables trivial MITM attacks.",
+     "Remove ALLOW_ALL_HOSTNAME_VERIFIER. Use the default "
+     "StrictHostnameVerifier."),
+    (re.compile(r"setPrimaryClip\s*\("),
+     "Clipboard write detected", "INFO", "QUILL-APK-112",
+     "The application writes to the system clipboard via setPrimaryClip(). "
+     "On Android < 10 any app can read clipboard content, potentially "
+     "exposing copied sensitive data (tokens, passwords).",
+     "Avoid placing sensitive data on the clipboard. If required, clear "
+     "the clipboard after a short timeout."),
+]
+
+_LOG_CALL_RX = re.compile(r"\bLog\.[dviwe]\s*\(")
+
+
+def analyse_android_code(app_dir: Path, output_dir: Path) -> None:
+    _check_pause()
+    _save_checkpoint()
+    log(f"[sast] Starting Android SAST code analysis for {app_dir.name}...")
+    status("sast", "Android code analysis", "running")
+
+    out_file = output_dir / "sast_analysis.json"
+
+    code_files: list = []
+    for ext in ("smali", "java", "kt", "xml"):
+        code_files.extend(app_dir.rglob(f"*.{ext}"))
+    log(f"[sast] Found {len(code_files)} code file(s) to scan (smali/java/kt/xml)")
+
+    dex_text = ""
+    if not any(f.suffix == ".smali" for f in code_files):
+        strings_bin = shutil.which("strings")
+        if strings_bin:
+            for dex in app_dir.rglob("*.dex"):
+                cp = _run_tool_cmd([strings_bin, str(dex)],
+                                   output_file=str(output_dir / f"sast_strings_{dex.name}.txt"),
+                                   timeout=120, tool_name="strings")
+                if cp is not None:
+                    dex_text += (cp.stdout or "")
+            if dex_text:
+                log(f"[sast] No smali files — scanning DEX strings ({len(dex_text)} chars)")
+
+    pattern_hits: dict = {}
+    for pat, title, sev, cat_id, desc, remed in _SAST_PATTERNS:
+        pattern_hits[cat_id] = {"title": title, "severity": sev, "cat_id": cat_id,
+                                "desc": desc, "remed": remed, "files": []}
+
+    log_call_count = 0
+    log_files: list = []
+    file_idx = 0
+    for cf in code_files:
+        file_idx += 1
+        if file_idx % 50 == 0:
+            _check_pause()
+        try:
+            text = cf.read_text(encoding="utf-8", errors="ignore")[:300000]
+        except Exception:
+            continue
+        for pat, title, sev, cat_id, desc, remed in _SAST_PATTERNS:
+            if pat.search(text):
+                if len(pattern_hits[cat_id]["files"]) < 5:
+                    pattern_hits[cat_id]["files"].append(str(cf))
+        lc = len(_LOG_CALL_RX.findall(text))
+        if lc > 0:
+            log_call_count += lc
+            if len(log_files) < 5:
+                log_files.append(str(cf))
+
+    if dex_text:
+        for pat, title, sev, cat_id, desc, remed in _SAST_PATTERNS:
+            if pat.search(dex_text) and not pattern_hits[cat_id]["files"]:
+                pattern_hits[cat_id]["files"].append("(DEX strings)")
+        lc = len(_LOG_CALL_RX.findall(dex_text))
+        log_call_count += lc
+
+    result = {"patterns": {}, "log_call_count": log_call_count}
+    finding_count = 0
+    for cat_id, info in pattern_hits.items():
+        if info["files"]:
+            result["patterns"][cat_id] = {"title": info["title"], "files": info["files"]}
+            file_list = ", ".join(Path(f).name for f in info["files"][:5])
+            finding(title=f"Android SAST: {info['title']}",
+                    severity=info["severity"],
+                    description=f"{info['desc']} Found in: {file_list}.",
+                    data={"catalogue_id": cat_id,
+                          "affected": file_list,
+                          "remediation": info["remed"]},
+                    output_file=str(out_file))
+            finding_count += 1
+
+    if log_call_count > 50:
+        result["excessive_logging"] = True
+        file_list = ", ".join(Path(f).name for f in log_files[:5])
+        finding(title=f"Android SAST: Excessive logging ({log_call_count} Log calls)",
+                severity="LOW",
+                description=(f"The application contains {log_call_count} Log.d/v/i/w/e calls. "
+                             f"Verbose logging in production can leak sensitive data to logcat, "
+                             f"which is readable by other apps on rooted devices."),
+                data={"catalogue_id": "QUILL-APK-113",
+                      "affected": file_list,
+                      "remediation": "Remove or guard debug logging with BuildConfig.DEBUG checks. "
+                                     "Use ProGuard/R8 to strip Log calls in release builds."},
+                output_file=str(out_file))
+        finding_count += 1
+
+    out_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    _analysis_log(out_file, "Android SAST code analysis",
+                  [f"app_dir: {app_dir}",
+                   f"code_files_scanned: {len(code_files)}",
+                   f"dex_fallback: {bool(dex_text)}",
+                   f"patterns_matched: {finding_count}",
+                   f"log_call_count: {log_call_count}"])
+
+    log(f"[sast] Android SAST code analysis complete — {finding_count} pattern(s) matched, "
+        f"{log_call_count} log call(s)")
+    status("sast", "Android code analysis", "complete")
+
+
+# ── Tracker SDK detection ────────────────────────────────────────────────────
+
+_KNOWN_TRACKERS = {
+    "com.google.android.gms.analytics": "Google Analytics",
+    "com.google.firebase.analytics": "Firebase Analytics",
+    "com.facebook.appevents": "Facebook Analytics",
+    "com.facebook.ads": "Facebook Ads",
+    "com.adjust.sdk": "Adjust",
+    "com.appsflyer": "AppsFlyer",
+    "io.branch": "Branch.io",
+    "com.mixpanel.android": "Mixpanel",
+    "com.amplitude": "Amplitude",
+    "com.crashlytics": "Crashlytics",
+    "com.newrelic": "New Relic",
+    "com.segment.analytics": "Segment",
+    "com.braze": "Braze",
+    "com.urbanairship": "Urban Airship",
+    "com.flurry": "Flurry",
+    "ly.count.android": "Countly",
+    "com.clevertap": "CleverTap",
+    "com.onesignal": "OneSignal",
+    "com.batch.android": "Batch",
+    "com.leanplum": "Leanplum",
+    "com.appdynamics": "AppDynamics",
+    "com.instabug": "Instabug",
+    "com.bugsnag": "Bugsnag",
+    "io.sentry.android": "Sentry",
+}
+
+
+def detect_trackers(app_dir: Path, output_dir: Path) -> None:
+    _check_pause()
+    _save_checkpoint()
+    log(f"[trackers] Starting tracker SDK detection for {app_dir.name}...")
+    status("trackers", "Tracker SDK detection", "running")
+
+    out_file = output_dir / "tracker_analysis.json"
+    found_trackers: list = []
+
+    smali_dirs = set()
+    for smali in app_dir.rglob("*.smali"):
+        try:
+            rel = smali.relative_to(app_dir)
+            parts = list(rel.parts)
+            if parts and parts[0].startswith("smali"):
+                parts = parts[1:]
+            pkg = ".".join(parts[:-1]) if len(parts) > 1 else ""
+            if pkg:
+                smali_dirs.add(pkg)
+        except Exception:
+            continue
+
+    if smali_dirs:
+        log(f"[trackers] Scanning {len(smali_dirs)} smali package path(s)")
+        for tracker_pkg, tracker_name in _KNOWN_TRACKERS.items():
+            for pkg in smali_dirs:
+                if pkg.startswith(tracker_pkg):
+                    found_trackers.append({"package": tracker_pkg, "name": tracker_name,
+                                           "method": "smali_path", "evidence": pkg})
+                    break
+    else:
+        log("[trackers] No smali dirs — scanning DEX strings for tracker package names")
+        strings_bin = shutil.which("strings")
+        dex_text = ""
+        if strings_bin:
+            for dex in app_dir.rglob("*.dex"):
+                cp = _run_tool_cmd([strings_bin, str(dex)],
+                                   output_file=str(output_dir / f"tracker_strings_{dex.name}.txt"),
+                                   timeout=120, tool_name="strings")
+                if cp is not None:
+                    dex_text += (cp.stdout or "")
+        for cf in app_dir.rglob("*.xml"):
+            try:
+                dex_text += cf.read_text(encoding="utf-8", errors="ignore")[:100000]
+            except Exception:
+                continue
+
+        for tracker_pkg, tracker_name in _KNOWN_TRACKERS.items():
+            pkg_slash = tracker_pkg.replace(".", "/")
+            if tracker_pkg in dex_text or pkg_slash in dex_text:
+                found_trackers.append({"package": tracker_pkg, "name": tracker_name,
+                                       "method": "dex_strings"})
+
+    seen = set()
+    deduped = []
+    for t in found_trackers:
+        if t["package"] not in seen:
+            seen.add(t["package"])
+            deduped.append(t)
+    found_trackers = deduped
+
+    result = {"trackers_found": len(found_trackers), "trackers": found_trackers}
+    out_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    _analysis_log(out_file, "Tracker SDK detection",
+                  [f"app_dir: {app_dir}",
+                   f"smali_packages: {len(smali_dirs)}",
+                   f"trackers_found: {len(found_trackers)}"])
+
+    for t in found_trackers:
+        log(f"[trackers] Tracker detected: {t['name']} ({t['package']})")
+        finding(title=f"Tracker SDK detected: {t['name']}",
+                severity="INFO",
+                description=(f"The application embeds the {t['name']} tracking SDK "
+                             f"(package: {t['package']}). Tracking SDKs collect user "
+                             f"behaviour data and may transmit it to third-party servers."),
+                data={"catalogue_id": "QUILL-APK-120",
+                      "affected": t["package"]},
+                output_file=str(out_file))
+
+    if len(found_trackers) > 5:
+        names = ", ".join(t["name"] for t in found_trackers)
+        finding(title=f"Excessive tracking SDKs ({len(found_trackers)} detected)",
+                severity="LOW",
+                description=(f"The application embeds {len(found_trackers)} tracking SDKs: "
+                             f"{names}. Each SDK increases the attack surface, adds data "
+                             f"collection endpoints, and expands the privacy impact."),
+                data={"catalogue_id": "QUILL-APK-121",
+                      "affected": names,
+                      "remediation": "Review tracker necessity. Remove unused SDKs and "
+                                     "consolidate analytics to reduce third-party exposure."},
+                output_file=str(out_file))
+
+    log(f"[trackers] Tracker SDK detection complete — {len(found_trackers)} tracker(s) found")
+    status("trackers", "Tracker SDK detection", "complete")
+
+
+# ── APKiD / packer detection ─────────────────────────────────────────────────
+
+def analyse_apkid(app_dir: Path, output_dir: Path) -> None:
+    _check_pause()
+    _save_checkpoint()
+    log(f"[apkid] Starting APKiD / packer detection for {app_dir.name}...")
+    status("apkid", "APKiD / packer detection", "running")
+
+    out_file = output_dir / "apkid_analysis.json"
+    result: dict = {"anti_debug": [], "anti_vm": [], "packers": [], "method": "signature"}
+
+    apkid_bin = shutil.which("apkid")
+    if apkid_bin:
+        log(f"[apkid] apkid binary found: {apkid_bin} — running JSON analysis")
+        result["method"] = "apkid"
+        apkid_out = output_dir / "apkid_raw.json"
+        cp = _run_tool_cmd([apkid_bin, "-j", str(app_dir)],
+                           output_file=str(apkid_out), timeout=120, tool_name="apkid")
+        if cp is not None:
+            raw = cp.stdout or ""
+            apkid_out.write_text(raw, encoding="utf-8")
+            try:
+                apkid_data = json.loads(raw)
+                for file_entry in apkid_data if isinstance(apkid_data, list) else [apkid_data]:
+                    matches = file_entry.get("matches") or file_entry.get("results") or {}
+                    for category, items in (matches.items() if isinstance(matches, dict) else []):
+                        cat_l = category.lower()
+                        if "anti_debug" in cat_l or "anti_disassembly" in cat_l:
+                            result["anti_debug"].extend(items if isinstance(items, list) else [items])
+                        elif "anti_vm" in cat_l or "anti_emulator" in cat_l:
+                            result["anti_vm"].extend(items if isinstance(items, list) else [items])
+                        elif "packer" in cat_l or "obfuscator" in cat_l or "protector" in cat_l:
+                            result["packers"].extend(items if isinstance(items, list) else [items])
+            except (json.JSONDecodeError, KeyError):
+                log("[apkid] Failed to parse apkid JSON output — falling back to signatures")
+                result["method"] = "signature"
+
+    if result["method"] == "signature":
+        log("[apkid] Using signature-based fallback analysis")
+        all_text = ""
+        file_idx = 0
+        for sf in app_dir.rglob("*.smali"):
+            file_idx += 1
+            if file_idx % 100 == 0:
+                _check_pause()
+            try:
+                all_text += sf.read_text(encoding="utf-8", errors="ignore")[:200000]
+            except Exception:
+                continue
+
+        if not all_text:
+            strings_bin = shutil.which("strings")
+            if strings_bin:
+                for dex in app_dir.rglob("*.dex"):
+                    cp = _run_tool_cmd([strings_bin, str(dex)],
+                                       output_file=str(output_dir / f"apkid_strings_{dex.name}.txt"),
+                                       timeout=120, tool_name="strings")
+                    if cp is not None:
+                        all_text += (cp.stdout or "")
+
+        _anti_debug_sigs = ["isDebuggerConnected", "Debug.isDebuggerConnected",
+                            "ptrace", "TracerPid", "android.os.Debug"]
+        _anti_vm_sigs = ["Build.FINGERPRINT", "Build.MODEL", "Build.MANUFACTURER",
+                         "ro.hardware", "goldfish", "generic", "google_sdk",
+                         "Emulator", "Andy", "nox", "BlueStacks"]
+        _packer_sigs = {
+            "com.guardsquare.dexguard": "DexGuard",
+            "com.secneo": "Secneo/Bangcle",
+            "com.bangcle": "Bangcle",
+            "com.tencent.StubShell": "Tencent Legu",
+            "com.qihoo.util": "Qihoo 360",
+            "com.secshell": "SecShell",
+            "com.alibaba.wireless.security": "Alibaba",
+            "com.baidu.protect": "Baidu",
+        }
+
+        for sig in _anti_debug_sigs:
+            if sig in all_text:
+                result["anti_debug"].append(sig)
+        for sig in _anti_vm_sigs:
+            if sig in all_text:
+                result["anti_vm"].append(sig)
+        for pkg, name in _packer_sigs.items():
+            pkg_slash = pkg.replace(".", "/")
+            if pkg in all_text or pkg_slash in all_text:
+                result["packers"].append(name)
+
+        mapping_files = list(app_dir.rglob("mapping.txt")) + list(app_dir.rglob("proguard*"))
+        if mapping_files:
+            result["packers"].append("ProGuard/R8 (mapping file present)")
+
+        for dex in app_dir.rglob("*.dex"):
+            try:
+                with open(dex, "rb") as f:
+                    magic = f.read(8)
+                if magic[:4] != b"dex\n":
+                    result["packers"].append(f"Non-standard DEX header in {dex.name}")
+            except Exception:
+                continue
+
+    out_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    _analysis_log(out_file, "APKiD / packer detection",
+                  [f"app_dir: {app_dir}",
+                   f"method: {result['method']}",
+                   f"anti_debug: {len(result['anti_debug'])}",
+                   f"anti_vm: {len(result['anti_vm'])}",
+                   f"packers: {len(result['packers'])}"])
+
+    if result["anti_debug"]:
+        sigs = ", ".join(str(s) for s in result["anti_debug"][:10])
+        log(f"[apkid] Anti-debug mechanisms detected: {sigs}")
+        finding(title=f"Anti-debug mechanism detected ({len(result['anti_debug'])} indicator(s))",
+                severity="INFO",
+                description=(f"The application contains anti-debugging indicators: {sigs}. "
+                             f"This is a positive security control that makes dynamic analysis "
+                             f"and tampering more difficult."),
+                data={"catalogue_id": "QUILL-APK-125", "affected": sigs},
+                output_file=str(out_file))
+
+    if result["anti_vm"]:
+        sigs = ", ".join(str(s) for s in result["anti_vm"][:10])
+        log(f"[apkid] Anti-emulator detection found: {sigs}")
+        finding(title=f"Anti-emulator detection found ({len(result['anti_vm'])} indicator(s))",
+                severity="INFO",
+                description=(f"The application checks for emulator/VM environment: {sigs}. "
+                             f"This is a positive security control that hinders automated "
+                             f"analysis in emulated environments."),
+                data={"catalogue_id": "QUILL-APK-126", "affected": sigs},
+                output_file=str(out_file))
+
+    if result["packers"]:
+        names = ", ".join(str(s) for s in result["packers"][:10])
+        log(f"[apkid] Packer/obfuscator detected: {names}")
+        finding(title=f"Packer/obfuscator detected: {names}",
+                severity="INFO",
+                description=(f"The application uses code protection: {names}. "
+                             f"Obfuscation and packing make reverse engineering more "
+                             f"difficult, which is a positive security measure."),
+                data={"catalogue_id": "QUILL-APK-127", "affected": names},
+                output_file=str(out_file))
+
+    if not result["anti_debug"] and not result["anti_vm"] and not result["packers"]:
+        log("[apkid] No obfuscation, anti-debug, or anti-VM mechanisms detected")
+        finding(title="No code protection/obfuscation detected",
+                severity="LOW",
+                description=("The application does not appear to use code obfuscation, "
+                             "packing, anti-debugging, or anti-emulator protections. "
+                             "The APK can be trivially decompiled and analysed."),
+                data={"catalogue_id": "QUILL-APK-128",
+                      "remediation": "Apply ProGuard/R8 at minimum. Consider DexGuard or "
+                                     "similar commercial protectors for high-value apps."},
+                output_file=str(out_file))
+
+    log(f"[apkid] APKiD / packer detection complete — method={result['method']}")
+    status("apkid", "APKiD / packer detection", "complete")
+
+
+# ── Firebase detection ────────────────────────────────────────────────────────
+
+_FIREBASE_DB_RX = re.compile(r"https?://[a-zA-Z0-9._-]+\.firebaseio\.com[^\s\"'<>]*")
+_FIREBASE_STORAGE_RX = re.compile(r"https?://firebasestorage\.googleapis\.com[^\s\"'<>]*")
+_FIREBASE_REMOTE_CONFIG_RX = re.compile(
+    r"FirebaseRemoteConfig|com\.google\.firebase\.remoteconfig|"
+    r"com/google/firebase/remoteconfig")
+
+
+def detect_firebase(app_dir: Path, output_dir: Path) -> None:
+    _check_pause()
+    _save_checkpoint()
+    log(f"[firebase] Starting Firebase detection for {app_dir.name}...")
+    status("firebase", "Firebase detection", "running")
+
+    out_file = output_dir / "firebase_analysis.json"
+    result: dict = {"db_urls": [], "storage_urls": [], "google_services": None,
+                    "remote_config": False}
+
+    text_exts = {"xml", "json", "smali", "java", "kt", "properties", "txt", "cfg", "yml", "yaml"}
+    all_text = ""
+    file_idx = 0
+    for ext in text_exts:
+        for f in app_dir.rglob(f"*.{ext}"):
+            file_idx += 1
+            if file_idx % 50 == 0:
+                _check_pause()
+            try:
+                all_text += f.read_text(encoding="utf-8", errors="ignore")[:200000]
+            except Exception:
+                continue
+
+    strings_bin = shutil.which("strings")
+    if strings_bin:
+        for dex in app_dir.rglob("*.dex"):
+            cp = _run_tool_cmd([strings_bin, str(dex)],
+                               output_file=str(output_dir / f"firebase_strings_{dex.name}.txt"),
+                               timeout=120, tool_name="strings")
+            if cp is not None:
+                all_text += (cp.stdout or "")
+
+    db_urls = list(set(_FIREBASE_DB_RX.findall(all_text)))
+    storage_urls = list(set(_FIREBASE_STORAGE_RX.findall(all_text)))
+    has_remote_config = bool(_FIREBASE_REMOTE_CONFIG_RX.search(all_text))
+    result["db_urls"] = db_urls[:20]
+    result["storage_urls"] = storage_urls[:20]
+    result["remote_config"] = has_remote_config
+
+    gs_files = list(app_dir.rglob("google-services.json"))
+    if gs_files:
+        gs_path = gs_files[0]
+        log(f"[firebase] google-services.json found: {gs_path}")
+        try:
+            gs_data = json.loads(gs_path.read_text(encoding="utf-8"))
+            project_id = (gs_data.get("project_info") or {}).get("project_id", "")
+            result["google_services"] = {"path": str(gs_path), "project_id": project_id}
+        except Exception:
+            result["google_services"] = {"path": str(gs_path), "project_id": ""}
+
+    out_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    _analysis_log(out_file, "Firebase detection",
+                  [f"app_dir: {app_dir}",
+                   f"db_urls: {len(db_urls)}",
+                   f"storage_urls: {len(storage_urls)}",
+                   f"google_services: {result['google_services'] is not None}",
+                   f"remote_config: {has_remote_config}"])
+
+    for url in db_urls[:10]:
+        log(f"[firebase] Firebase Realtime Database URL: {url}")
+        finding(title=f"Firebase Realtime Database URL detected",
+                severity="MEDIUM",
+                description=(f"The application references a Firebase Realtime Database: {url}. "
+                             f"If database rules allow unauthenticated reads, anyone can "
+                             f"access the data by appending .json to the URL."),
+                data={"catalogue_id": "QUILL-APK-130", "affected": url,
+                      "remediation": "Review Firebase Realtime Database security rules. "
+                                     "Ensure authentication is required for all read/write operations."},
+                output_file=str(out_file))
+
+    for url in storage_urls[:10]:
+        log(f"[firebase] Firebase Storage URL: {url}")
+        finding(title=f"Firebase Storage URL detected",
+                severity="MEDIUM",
+                description=(f"The application references Firebase Storage: {url}. "
+                             f"If storage rules are misconfigured, files may be publicly "
+                             f"downloadable or uploadable."),
+                data={"catalogue_id": "QUILL-APK-131", "affected": url,
+                      "remediation": "Review Firebase Storage security rules. "
+                                     "Require authentication for all read/write operations."},
+                output_file=str(out_file))
+
+    if result["google_services"]:
+        pid = result["google_services"].get("project_id", "(unknown)")
+        finding(title=f"Google Services configuration file present (project: {pid})",
+                severity="INFO",
+                description=(f"google-services.json found with project ID: {pid}. "
+                             f"This file contains Firebase project configuration including "
+                             f"API keys and project identifiers. While not secret per se, "
+                             f"it identifies the backend infrastructure."),
+                data={"catalogue_id": "QUILL-APK-132",
+                      "affected": pid},
+                output_file=str(out_file))
+
+    if has_remote_config:
+        log("[firebase] Firebase Remote Config usage detected")
+        finding(title="Firebase Remote Config in use",
+                severity="INFO",
+                description=("The application uses Firebase Remote Config, which fetches "
+                             "configuration values from Google's servers at runtime. "
+                             "Ensure the config does not control security-sensitive "
+                             "parameters (feature flags for auth, URLs, keys)."),
+                data={"catalogue_id": "QUILL-APK-133"},
+                output_file=str(out_file))
+
+    log(f"[firebase] Firebase detection complete — {len(db_urls)} DB URL(s), "
+        f"{len(storage_urls)} storage URL(s)")
+    status("firebase", "Firebase detection", "complete")
+
+
+# ── Certificate / signing analysis ───────────────────────────────────────────
+
+def analyse_signing(apk_path: Path, app_dir: Path, output_dir: Path) -> None:
+    _check_pause()
+    _save_checkpoint()
+    log(f"[signing] Starting APK signing analysis for {apk_path.name}...")
+    status("signing", "APK signing analysis", "running")
+
+    out_file = output_dir / "signing_analysis.json"
+    result: dict = {"v1": False, "v2": False, "v3": False, "certs": [],
+                    "tool_used": None, "raw_output": ""}
+
+    apksigner = shutil.which("apksigner")
+    if apksigner:
+        log(f"[signing] Using apksigner: {apksigner}")
+        result["tool_used"] = "apksigner"
+        raw_file = output_dir / "apksigner_output.txt"
+        cp = _run_tool_cmd([apksigner, "verify", "--print-certs", "-v", str(apk_path)],
+                           output_file=str(raw_file), timeout=60, tool_name="apksigner")
+        if cp is not None:
+            raw = (cp.stdout or "") + (cp.stderr or "")
+            raw_file.write_text(raw, encoding="utf-8")
+            result["raw_output"] = raw[:5000]
+
+            result["v1"] = "Verified using v1 scheme (JAR signing): true" in raw
+            result["v2"] = "Verified using v2 scheme (APK Signature Scheme v2): true" in raw
+            result["v3"] = "Verified using v3 scheme (APK Signature Scheme v3): true" in raw
+
+            for line in raw.splitlines():
+                line_s = line.strip()
+                if line_s.startswith("Signer #") and "certificate" in line_s.lower():
+                    continue
+                if "DN:" in line_s or "CN=" in line_s:
+                    result["certs"].append(line_s)
+                if "digest algorithm:" in line_s.lower() or "signature algorithm:" in line_s.lower():
+                    result["certs"].append(line_s)
+    else:
+        jarsigner = shutil.which("jarsigner")
+        if jarsigner:
+            log(f"[signing] apksigner not found — using jarsigner: {jarsigner}")
+            result["tool_used"] = "jarsigner"
+            raw_file = output_dir / "jarsigner_output.txt"
+            cp = _run_tool_cmd([jarsigner, "-verify", "-verbose", "-certs", str(apk_path)],
+                               output_file=str(raw_file), timeout=60, tool_name="jarsigner")
+            if cp is not None:
+                raw = (cp.stdout or "") + (cp.stderr or "")
+                raw_file.write_text(raw, encoding="utf-8")
+                result["raw_output"] = raw[:5000]
+                result["v1"] = "jar verified" in raw.lower()
+                for line in raw.splitlines():
+                    if "CN=" in line or "Owner:" in line or "Issuer:" in line:
+                        result["certs"].append(line.strip())
+        else:
+            log("[signing] Neither apksigner nor jarsigner available — skipping signing analysis")
+            status("signing", "APK signing analysis", "skipped")
+            return
+
+    out_file.write_text(json.dumps({k: v for k, v in result.items() if k != "raw_output"},
+                                    indent=2), encoding="utf-8")
+    _analysis_log(out_file, "APK signing analysis",
+                  [f"apk: {apk_path}",
+                   f"tool: {result['tool_used']}",
+                   f"v1: {result['v1']}, v2: {result['v2']}, v3: {result['v3']}",
+                   f"certs: {len(result['certs'])}"])
+
+    raw = result["raw_output"]
+
+    if result["v1"] and not result["v2"] and not result["v3"]:
+        log("[signing] Only v1 (JAR) signing — vulnerable to Janus CVE-2017-13156")
+        finding(title="APK uses only v1 (JAR) signing — Janus vulnerability (CVE-2017-13156)",
+                severity="HIGH",
+                description=("The APK is signed only with the v1 (JAR) signature scheme. "
+                             "V1-only signed APKs are vulnerable to the Janus attack "
+                             "(CVE-2017-13156), which allows prepending a DEX file to the "
+                             "APK without invalidating the signature."),
+                data={"catalogue_id": "QUILL-APK-140",
+                      "affected": str(apk_path),
+                      "cves": "CVE-2017-13156",
+                      "remediation": "Sign with v2 (or v3) APK Signature Scheme in addition to v1."},
+                output_file=str(out_file))
+
+    weak_algos = []
+    for algo in ("SHA1withRSA", "MD5withRSA", "SHA1withDSA", "MD5withDSA"):
+        if algo in raw:
+            weak_algos.append(algo)
+    if weak_algos:
+        algo_str = ", ".join(weak_algos)
+        log(f"[signing] Weak signature algorithm detected: {algo_str}")
+        finding(title=f"Weak signing algorithm: {algo_str}",
+                severity="MEDIUM",
+                description=(f"The APK certificate uses weak signature algorithm(s): "
+                             f"{algo_str}. SHA-1 and MD5 are vulnerable to collision attacks."),
+                data={"catalogue_id": "QUILL-APK-141",
+                      "affected": algo_str,
+                      "remediation": "Re-sign with SHA-256 (SHA256withRSA or SHA256withECDSA)."},
+                output_file=str(out_file))
+
+    if "Android Debug" in raw or "CN=Android Debug" in raw:
+        log("[signing] Debug certificate detected")
+        finding(title="APK signed with debug certificate",
+                severity="HIGH",
+                description=("The APK is signed with the Android debug keystore certificate "
+                             "(CN=Android Debug). Debug-signed apps cannot be published to "
+                             "the Play Store and their private key is publicly known."),
+                data={"catalogue_id": "QUILL-APK-143",
+                      "affected": str(apk_path),
+                      "remediation": "Sign with a production release keystore before distribution."},
+                output_file=str(out_file))
+
+    cert_summary = "; ".join(result["certs"][:5]) if result["certs"] else "(no cert details extracted)"
+    schemes = []
+    if result["v1"]:
+        schemes.append("v1")
+    if result["v2"]:
+        schemes.append("v2")
+    if result["v3"]:
+        schemes.append("v3")
+    scheme_str = "+".join(schemes) if schemes else "unknown"
+    finding(title=f"APK signing details: {scheme_str}",
+            severity="INFO",
+            description=(f"APK signing scheme(s): {scheme_str}. "
+                         f"Certificate details: {cert_summary}"),
+            data={"catalogue_id": "QUILL-APK-140",
+                  "affected": str(apk_path)},
+            output_file=str(out_file))
+
+    log(f"[signing] APK signing analysis complete — schemes: {scheme_str}")
+    status("signing", "APK signing analysis", "complete")
+
+
+# ── Browsable activities / deep link analysis ────────────────────────────────
+
+def analyse_browsable_activities(app_dir: Path, output_dir: Path,
+                                 manifest_data: dict) -> None:
+    _check_pause()
+    _save_checkpoint()
+    log(f"[deeplinks] Starting browsable activity / deep link analysis for {app_dir.name}...")
+    status("deeplinks", "Deep link analysis", "running")
+
+    out_file = output_dir / "deep_link_analysis.json"
+    deep_links: list = []
+
+    manifest_path = app_dir / "AndroidManifest.xml"
+    if not manifest_path.exists():
+        log("[deeplinks] AndroidManifest.xml not found — skipping")
+        status("deeplinks", "Deep link analysis", "skipped")
+        return
+
+    try:
+        tree = ET.parse(manifest_path)
+        root = tree.getroot()
+    except ET.ParseError as exc:
+        err(f"[deeplinks] Manifest parse error: {exc}")
+        status("deeplinks", "Deep link analysis", "error")
+        return
+
+    ns = {"android": "http://schemas.android.com/apk/res/android"}
+    package = manifest_data.get("package", root.get("package", ""))
+    app_el = root.find("application")
+    if app_el is None:
+        log("[deeplinks] No <application> element — skipping")
+        status("deeplinks", "Deep link analysis", "complete")
+        return
+
+    comp_map = {}
+    for c in manifest_data.get("components", []):
+        comp_map[c.get("name", "")] = c
+
+    for activity in app_el.findall("activity"):
+        act_name = activity.get(f"{{{ns['android']}}}name",
+                                activity.get("name", ""))
+        for intent_filter in activity.findall("intent-filter"):
+            categories = [c.get(f"{{{ns['android']}}}name",
+                                c.get("name", ""))
+                          for c in intent_filter.findall("category")]
+            if "android.intent.category.BROWSABLE" not in categories:
+                continue
+
+            data_elements = intent_filter.findall("data")
+            schemes_hosts: list = []
+            for d in data_elements:
+                scheme = d.get(f"{{{ns['android']}}}scheme",
+                               d.get("scheme", ""))
+                host = d.get(f"{{{ns['android']}}}host",
+                             d.get("host", ""))
+                path = d.get(f"{{{ns['android']}}}path",
+                             d.get("path", ""))
+                path_prefix = d.get(f"{{{ns['android']}}}pathPrefix",
+                                    d.get("pathPrefix", ""))
+                path_pattern = d.get(f"{{{ns['android']}}}pathPattern",
+                                     d.get("pathPattern", ""))
+                entry = {"scheme": scheme, "host": host}
+                if path:
+                    entry["path"] = path
+                if path_prefix:
+                    entry["pathPrefix"] = path_prefix
+                if path_pattern:
+                    entry["pathPattern"] = path_pattern
+                schemes_hosts.append(entry)
+
+            comp_info = comp_map.get(act_name, {})
+            is_exported = comp_info.get("exported", True)
+            has_permission = bool(comp_info.get("permission", ""))
+
+            link_entry = {
+                "activity": act_name,
+                "exported": is_exported,
+                "permission": comp_info.get("permission", ""),
+                "data": schemes_hosts,
+            }
+            deep_links.append(link_entry)
+
+            uri_parts = []
+            for sh in schemes_hosts:
+                uri = f"{sh['scheme']}://{sh['host']}" if sh.get("scheme") and sh.get("host") else ""
+                if uri and sh.get("pathPrefix"):
+                    uri += sh["pathPrefix"]
+                elif uri and sh.get("path"):
+                    uri += sh["path"]
+                if uri:
+                    uri_parts.append(uri)
+            uri_str = ", ".join(uri_parts) if uri_parts else "(no scheme+host)"
+
+            log(f"[deeplinks] Browsable activity: {act_name} → {uri_str}")
+            finding(title=f"Browsable activity: {act_name}",
+                    severity="INFO",
+                    description=(f"Activity {act_name} is registered with BROWSABLE category "
+                                 f"and handles deep links: {uri_str}. Any app or web page can "
+                                 f"invoke this activity via an intent URL."),
+                    data={"catalogue_id": "QUILL-APK-150",
+                          "affected": f"{package}/{act_name}"},
+                    output_file=str(out_file))
+
+            if is_exported and not has_permission:
+                finding(title=f"Unprotected browsable activity: {act_name}",
+                        severity="MEDIUM",
+                        description=(f"Activity {act_name} is exported, browsable, and has no "
+                                     f"permission guard. Deep links ({uri_str}) can be crafted "
+                                     f"to invoke it with arbitrary parameters. Verify all "
+                                     f"intent extras and URI parameters are validated."),
+                        data={"catalogue_id": "QUILL-APK-151",
+                              "affected": f"{package}/{act_name}",
+                              "remediation": "Add input validation for all intent extras and URI parameters. "
+                                             "Consider adding a custom permission or signature-level protection."},
+                        output_file=str(out_file))
+
+    result = {"total_deep_links": len(deep_links), "deep_links": deep_links}
+    out_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    _analysis_log(out_file, "Deep link analysis",
+                  [f"app_dir: {app_dir}",
+                   f"package: {package}",
+                   f"browsable_activities: {len(deep_links)}"])
+
+    log(f"[deeplinks] Deep link analysis complete — {len(deep_links)} browsable activity/activities")
+    status("deeplinks", "Deep link analysis", "complete")
+
+
+# ── Behaviour pattern analysis ───────────────────────────────────────────────
+
+_BEHAVIOUR_CHECKS = [
+    {
+        "id": "QUILL-APK-160", "label": "SMS sending",
+        "apis": [re.compile(r"SmsManager"), re.compile(r"sendTextMessage|sendMultipartTextMessage")],
+        "permissions": {"android.permission.SEND_SMS"},
+        "desc_with": "The application has SMS sending capability (SmsManager) with SEND_SMS permission.",
+        "desc_without": "The application uses SmsManager APIs but does NOT declare SEND_SMS permission. "
+                        "It may rely on reflection, target an older SDK, or invoke via intent.",
+    },
+    {
+        "id": "QUILL-APK-161", "label": "Phone call initiation",
+        "apis": [re.compile(r"ACTION_CALL|telecomManager|TelecomManager")],
+        "permissions": {"android.permission.CALL_PHONE"},
+        "desc_with": "The application can initiate phone calls (ACTION_CALL / TelecomManager) with CALL_PHONE permission.",
+        "desc_without": "The application references call-initiation APIs without CALL_PHONE permission.",
+    },
+    {
+        "id": "QUILL-APK-162", "label": "Contact access",
+        "apis": [re.compile(r"ContactsContract|content://contacts|content://com\.android\.contacts")],
+        "permissions": {"android.permission.READ_CONTACTS", "android.permission.WRITE_CONTACTS"},
+        "desc_with": "The application accesses the device contacts database with appropriate permission.",
+        "desc_without": "The application references contact APIs without declaring READ_CONTACTS or WRITE_CONTACTS.",
+    },
+    {
+        "id": "QUILL-APK-163", "label": "Location tracking",
+        "apis": [re.compile(r"requestLocationUpdates|getLastKnownLocation|FusedLocationProviderClient|LocationManager")],
+        "permissions": {"android.permission.ACCESS_FINE_LOCATION",
+                        "android.permission.ACCESS_COARSE_LOCATION",
+                        "android.permission.ACCESS_BACKGROUND_LOCATION"},
+        "desc_with": "The application tracks device location via GPS/network providers with location permission.",
+        "desc_without": "The application references location APIs without declaring location permissions.",
+    },
+    {
+        "id": "QUILL-APK-164", "label": "Camera capture",
+        "apis": [re.compile(r"ACTION_IMAGE_CAPTURE|camera\.open|Camera\.open|CameraManager|camera2")],
+        "permissions": {"android.permission.CAMERA"},
+        "desc_with": "The application captures images/video via camera APIs with CAMERA permission.",
+        "desc_without": "The application references camera APIs without declaring CAMERA permission.",
+    },
+    {
+        "id": "QUILL-APK-165", "label": "Audio recording",
+        "apis": [re.compile(r"MediaRecorder|AudioRecord|RECORD_AUDIO")],
+        "permissions": {"android.permission.RECORD_AUDIO"},
+        "desc_with": "The application can record audio via MediaRecorder/AudioRecord with RECORD_AUDIO permission.",
+        "desc_without": "The application references audio recording APIs without RECORD_AUDIO permission.",
+    },
+]
+
+
+def analyse_behaviour_patterns(app_dir: Path, output_dir: Path,
+                               manifest_data: dict) -> None:
+    _check_pause()
+    _save_checkpoint()
+    log(f"[behaviour] Starting behaviour pattern analysis for {app_dir.name}...")
+    status("behaviour", "Behaviour analysis", "running")
+
+    out_file = output_dir / "behaviour_analysis.json"
+    declared_perms = set(manifest_data.get("permissions", []))
+    package = manifest_data.get("package", "")
+    log(f"[behaviour] {len(declared_perms)} declared permission(s) for cross-reference")
+
+    all_text = ""
+    file_idx = 0
+    for ext in ("smali", "java", "kt"):
+        for f in app_dir.rglob(f"*.{ext}"):
+            file_idx += 1
+            if file_idx % 50 == 0:
+                _check_pause()
+            try:
+                all_text += f.read_text(encoding="utf-8", errors="ignore")[:200000]
+            except Exception:
+                continue
+
+    if not all_text:
+        strings_bin = shutil.which("strings")
+        if strings_bin:
+            for dex in app_dir.rglob("*.dex"):
+                cp = _run_tool_cmd([strings_bin, str(dex)],
+                                   output_file=str(output_dir / f"behaviour_strings_{dex.name}.txt"),
+                                   timeout=120, tool_name="strings")
+                if cp is not None:
+                    all_text += (cp.stdout or "")
+
+    results: list = []
+    for check in _BEHAVIOUR_CHECKS:
+        api_found = False
+        for rx in check["apis"]:
+            if rx.search(all_text):
+                api_found = True
+                break
+        if not api_found:
+            continue
+
+        has_perm = bool(check["permissions"] & declared_perms)
+        entry = {
+            "id": check["id"],
+            "label": check["label"],
+            "api_found": True,
+            "permission_declared": has_perm,
+            "matching_permissions": sorted(check["permissions"] & declared_perms),
+        }
+        results.append(entry)
+
+        if has_perm:
+            log(f"[behaviour] {check['label']}: API present + permission declared")
+            finding(title=f"Behaviour: {check['label']} capability detected",
+                    severity="INFO",
+                    description=check["desc_with"],
+                    data={"catalogue_id": check["id"], "affected": package},
+                    output_file=str(out_file))
+        else:
+            log(f"[behaviour] {check['label']}: API present WITHOUT permission — suspicious")
+            finding(title=f"Behaviour: {check['label']} API without permission",
+                    severity="MEDIUM",
+                    description=check["desc_without"],
+                    data={"catalogue_id": check["id"], "affected": package,
+                          "remediation": "Investigate how the API is used. The app may "
+                                         "use reflection, invoke via implicit intent, or "
+                                         "target an older SDK that grants the permission "
+                                         "implicitly."},
+                    output_file=str(out_file))
+
+    result_doc = {"behaviours_detected": len(results), "behaviours": results}
+    out_file.write_text(json.dumps(result_doc, indent=2), encoding="utf-8")
+    _analysis_log(out_file, "Behaviour pattern analysis",
+                  [f"app_dir: {app_dir}",
+                   f"package: {package}",
+                   f"declared_permissions: {len(declared_perms)}",
+                   f"behaviours_detected: {len(results)}"])
+
+    log(f"[behaviour] Behaviour analysis complete — {len(results)} pattern(s) detected")
+    status("behaviour", "Behaviour analysis", "complete")
+
+
 # ── File hash computation ──
 
 def compute_file_hashes(file_path: Path, output_dir: Path) -> None:
@@ -1869,7 +2860,8 @@ def main() -> int:
             import pr0t31n_dep_snapshot as _ds
             _ds.write_snapshot(
                 project_dir, "quill", VERSION,
-                binaries=["strings", "apktool", "frida", "codesign", "otool", "nm"],
+                binaries=["strings", "apktool", "frida", "codesign", "otool", "nm",
+                          "apkid", "apksigner", "jarsigner"],
                 pip_packages=[],
             )
         except Exception:
@@ -1913,6 +2905,20 @@ def main() -> int:
         analyse_strings_apk(app_dir, project_dir)
         _check_pause()
         analyse_network_security_config(app_dir, project_dir)
+        _check_pause()
+        analyse_android_code(app_dir, project_dir)
+        _check_pause()
+        detect_trackers(app_dir, project_dir)
+        _check_pause()
+        analyse_apkid(app_dir, project_dir)
+        _check_pause()
+        detect_firebase(app_dir, project_dir)
+        _check_pause()
+        analyse_signing(Path(app_path), app_dir, project_dir)
+        _check_pause()
+        analyse_browsable_activities(app_dir, project_dir, manifest_data)
+        _check_pause()
+        analyse_behaviour_patterns(app_dir, project_dir, manifest_data)
         _check_pause()
         compute_file_hashes(Path(app_path), project_dir)
 
