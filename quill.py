@@ -112,22 +112,30 @@ def _ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
 
-def _tok(token: str, msg: str) -> None:
+def _tok(token: str, payload: str) -> None:
     if _MANAGED:
-        print(f"{token}:[{datetime.now().isoformat()}] {msg}", flush=True)
+        print(f"{token}:{payload}", flush=True)
     else:
-        print(f"[{_ts()}] {msg}", flush=True)
+        print(f"[{_ts()}] {payload}", flush=True)
 
 
 def log(msg: str) -> None:
-    _tok("__CRUCIBLE_LOG__", msg)
+    if _MANAGED:
+        _tok("__CRUCIBLE_LOG__", json.dumps({
+            "ts": datetime.now().isoformat(), "level": "INFO", "message": msg}))
+    else:
+        _tok("__CRUCIBLE_LOG__", msg)
     if _RUNLOG is not None:
         try: _RUNLOG.info(msg)
         except Exception: pass
 
 
 def err(msg: str) -> None:
-    _tok("__CRUCIBLE_ERR__", msg)
+    if _MANAGED:
+        _tok("__CRUCIBLE_ERR__", json.dumps({
+            "ts": datetime.now().isoformat(), "level": "ERROR", "message": msg}))
+    else:
+        _tok("__CRUCIBLE_ERR__", msg)
     if _RUNLOG is not None:
         try: _RUNLOG.error(msg)
         except Exception: pass
