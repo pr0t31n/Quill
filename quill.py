@@ -177,6 +177,7 @@ def finding(*, title: str, severity: str, description: str,
         rec = _us.make_finding(
             tool="quill", title=title, risk=severity.upper(),
             description=description, ip="", port=0,
+            hostname=_APP_TARGET,
             command=(data or {}).get("command", ""),
             output_file=of_rel,
             affected=affected,
@@ -3013,6 +3014,9 @@ def main() -> int:
         _write_findings_csv(project_dir / "findings.csv", _findings)
         log(f"[finalize] findings.json + findings.csv written ({len(_findings)} findings, legacy format)")
 
+    log("[finalize] Generating intelligence data files...")
+    _write_intel_files(project_dir, platform, _APP_TARGET)
+
     log("[finalize] Generating cross-tool action items...")
     _generate_cross_tool_action_items(project_dir)
     if _pause is not None:
@@ -3021,6 +3025,198 @@ def main() -> int:
     log(f"[shutdown] Quill v{VERSION} complete — {len(_findings)} finding(s) "
         f"(C={rc['CRITICAL']} H={rc['HIGH']} M={rc['MEDIUM']} L={rc['LOW']} I={rc['INFO']}) — output: {project_dir}")
     return 0
+
+
+def _write_intel_files(project_dir: Path, platform: str, app_name: str) -> None:
+    """Write consolidated intelligence files for Crucible's mobile intel tabs."""
+
+    def _load(name):
+        p = project_dir / name
+        if p.exists():
+            try:
+                return json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        return None
+
+    app_entry = {"name": app_name, "platform": platform}
+
+    # ── components.json ──
+    components_data = {"apps": []}
+    if platform == "android":
+        manifest = _load("manifest_analysis.json")
+        if manifest:
+            app_entry_c = dict(app_entry)
+            app_entry_c["package"] = manifest.get("package", "")
+            app_entry_c["components"] = manifest.get("components", [])
+            app_entry_c["flags"] = manifest.get("flags", {})
+            components_data["apps"].append(app_entry_c)
+    elif platform == "ios":
+        plist = _load("info_plist.json")
+        if plist:
+            app_entry_c = dict(app_entry)
+            app_entry_c["bundle_id"] = plist.get("CFBundleIdentifier", "")
+            ents = []
+            ent_file = project_dir / "entitlements.xml"
+            if ent_file.exists():
+                try:
+                    raw = ent_file.read_text(encoding="utf-8", errors="replace")
+                    for line in raw.splitlines():
+                        line = line.strip()
+                        if line.startswith("<key>") and line.endswith("</key>"):
+                            ents.append(line[5:-6])
+                except Exception:
+                    pass
+            app_entry_c["entitlements"] = ents
+            app_entry_c["flags"] = {
+                "ats_enabled": bool(plist.get("NSAppTransportSecurity")),
+                "allows_arbitrary_loads": bool(
+                    (plist.get("NSAppTransportSecurity") or {}).get(
+                        "NSAllowsArbitraryLoads")),
+            }
+            components_data["apps"].append(app_entry_c)
+    try:
+        (project_dir / "components.json").write_text(
+            json.dumps(components_data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+    # ── permissions.json ──
+    perms_data = {"apps": []}
+    if platform == "android":
+        perm_analysis = _load("permission_analysis.json")
+        if perm_analysis:
+            app_entry_p = dict(app_entry)
+            dangerous = set(perm_analysis.get("dangerous", []))
+            all_perms = perm_analysis.get("dangerous", []) + perm_analysis.get("normal", [])
+            app_entry_p["permissions"] = [
+                {"name": p, "dangerous": p in dangerous}
+                for p in all_perms
+            ]
+            app_entry_p["dangerous_count"] = perm_analysis.get("dangerous_count", 0)
+            app_entry_p["total"] = perm_analysis.get("total", len(all_perms))
+            perms_data["apps"].append(app_entry_p)
+    elif platform == "ios":
+        ios_perms = _load("ios_permissions.json")
+        if ios_perms:
+            app_entry_p = dict(app_entry)
+            app_entry_p["permissions"] = ios_perms.get("permissions", [])
+            app_entry_p["dangerous_count"] = ios_perms.get("dangerous_count", 0)
+            app_entry_p["total"] = ios_perms.get("total_permissions", 0)
+            perms_data["apps"].append(app_entry_p)
+    try:
+        (project_dir / "permissions.json").write_text(
+            json.dumps(perms_data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+    # ── hardening.json ──
+    hardening_data = {"apps": []}
+    if platform == "ios":
+        mitigations = _load("ios_binary_mitigations.json")
+        if mitigations:
+            app_entry_h = dict(app_entry)
+            checks = []
+            for key, val in mitigations.items():
+                if key.startswith("_"):
+                    continue
+                if isinstance(val, bool):
+                    checks.append({"name": key, "status": "pass" if val else "fail",
+                                   "details": ""})
+                elif isinstance(val, dict):
+                    checks.append({"name": key,
+                                   "status": val.get("status", "unknown"),
+                                   "details": val.get("details", "")})
+            app_entry_h["checks"] = checks
+            hardening_data["apps"].append(app_entry_h)
+        fw = _load("framework_binary_analysis.json")
+        if fw and isinstance(fw, dict):
+            weak = fw.get("weak_binaries", [])
+            if weak:
+                for w in (weak if isinstance(weak, list) else []):
+                    name = w.get("name", "") if isinstance(w, dict) else str(w)
+                    app_entry_fw = {"name": f"{app_name} (framework: {name})",
+                                    "platform": platform,
+                                    "checks": w.get("checks", []) if isinstance(w, dict) else []}
+                    hardening_data["apps"].append(app_entry_fw)
+    elif platform == "android":
+        signing = _load("signing_analysis.json")
+        apkid = _load("apkid_analysis.json")
+        checks = []
+        manifest = _load("manifest_analysis.json")
+        if manifest:
+            flags = manifest.get("flags", {})
+            checks.append({"name": "debuggable",
+                           "status": "fail" if flags.get("debuggable") else "pass",
+                           "details": "android:debuggable flag"})
+            checks.append({"name": "allowBackup",
+                           "status": "fail" if flags.get("allowBackup") else "pass",
+                           "details": "android:allowBackup flag"})
+            checks.append({"name": "cleartext_traffic",
+                           "status": "fail" if flags.get("usesCleartextTraffic") else "pass",
+                           "details": "usesCleartextTraffic flag"})
+            checks.append({"name": "network_security_config",
+                           "status": "pass" if flags.get("networkSecurityConfig") else "warn",
+                           "details": "Custom network security configuration"})
+        if signing and isinstance(signing, dict):
+            scheme = signing.get("scheme", "")
+            checks.append({"name": "signing_scheme",
+                           "status": "pass" if "v2" in str(scheme).lower() or "v3" in str(scheme).lower() else "warn",
+                           "details": f"APK signing scheme: {scheme}"})
+        if apkid and isinstance(apkid, dict):
+            detections = apkid.get("detections", {}) if isinstance(apkid, dict) else {}
+            obf = any("obfuscat" in str(v).lower() for v in
+                       (detections.values() if isinstance(detections, dict) else []))
+            checks.append({"name": "obfuscation",
+                           "status": "pass" if obf else "warn",
+                           "details": "Code obfuscation detected" if obf else "No obfuscation detected"})
+        if checks:
+            app_entry_h = dict(app_entry)
+            app_entry_h["checks"] = checks
+            hardening_data["apps"].append(app_entry_h)
+    try:
+        (project_dir / "hardening.json").write_text(
+            json.dumps(hardening_data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+    # ── data.json ──
+    data_flow = {"apps": []}
+    app_entry_d = dict(app_entry)
+    if platform == "android":
+        nsc = _load("network_security_config_analysis.json")
+        app_entry_d["network_config"] = nsc or {}
+        dl = _load("deep_link_analysis.json")
+        app_entry_d["deep_links"] = (dl.get("activities", []) if isinstance(dl, dict) else dl) or []
+        fb = _load("firebase_analysis.json")
+        app_entry_d["firebase"] = fb or {}
+        trackers = _load("tracker_analysis.json")
+        app_entry_d["trackers"] = (trackers.get("trackers", []) if isinstance(trackers, dict) else []) or []
+    elif platform == "ios":
+        plist = _load("info_plist.json") or {}
+        ats = plist.get("NSAppTransportSecurity", {}) or {}
+        app_entry_d["network_config"] = {
+            "ats_enabled": bool(ats),
+            "allows_arbitrary_loads": ats.get("NSAllowsArbitraryLoads", False),
+            "exception_domains": list((ats.get("NSExceptionDomains") or {}).keys()),
+        }
+        app_entry_d["deep_links"] = []
+        schemes = plist.get("CFBundleURLTypes", [])
+        if isinstance(schemes, list):
+            for s in schemes:
+                if isinstance(s, dict):
+                    for sch in (s.get("CFBundleURLSchemes") or []):
+                        app_entry_d["deep_links"].append({"scheme": sch})
+        app_entry_d["firebase"] = {}
+        app_entry_d["trackers"] = []
+    data_flow["apps"].append(app_entry_d)
+    try:
+        (project_dir / "data.json").write_text(
+            json.dumps(data_flow, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+    log(f"[finalize] Intelligence files written (components/permissions/hardening/data)")
 
 
 def _generate_cross_tool_action_items(project_dir: Path) -> None:
