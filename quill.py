@@ -262,7 +262,7 @@ def analyse_info_plist(app_dir: Path, output_dir: Path) -> dict:
     log(f"[info_plist] Checking App Transport Security — ATS config present: {bool(ats)}")
     if ats.get("NSAllowsArbitraryLoads"):
         log("[info_plist] ATS: NSAllowsArbitraryLoads=true — finding emitted")
-        finding(title="Mobile Security: App Transport Security: arbitrary loads allowed",
+        finding(title="Network Security: App Transport Security Arbitrary Loads Allowed",
                  severity="HIGH",
                  description=("NSAllowsArbitraryLoads=true disables ATS globally; "
                                "non-HTTPS connections are permitted."),
@@ -276,7 +276,7 @@ def analyse_info_plist(app_dir: Path, output_dir: Path) -> dict:
     for dom, cfg in exc_domains.items():
         if cfg.get("NSExceptionAllowsInsecureHTTPLoads"):
             log(f"[info_plist] ATS: HTTP exception for domain {dom} — finding emitted")
-            finding(title=f"Mobile Security: ATS exception allows HTTP for {dom}",
+            finding(title=f"Network Security: ATS Exception Allows HTTP for {dom}",
                      severity="MEDIUM",
                      description=("Per-domain exception allows cleartext HTTP."),
                      data={"catalogue_id": "QUILL-IOS-002",
@@ -290,7 +290,7 @@ def analyse_info_plist(app_dir: Path, output_dir: Path) -> dict:
             log(f"URL scheme: {sch}://")
             if sch.lower() in ("http", "https", "file", "tel", "sms", "mailto"):
                 continue
-            finding(title=f"Mobile Security: Custom URL scheme registered: {sch}://",
+            finding(title=f"Attack Surface: Custom URL Scheme Registered: {sch}://",
                      severity="INFO",
                      description=("Custom URL schemes can be invoked by any app; "
                                    "ensure all parameters are validated and authentication "
@@ -338,7 +338,7 @@ def analyse_entitlements(app_dir: Path, output_dir: Path) -> None:
         log("[entitlements] Checking get-task-allow (debuggable)...")
         if "get-task-allow" in ent and "<true/>" in ent.split("get-task-allow")[-1][:60]:
             log("[entitlements] get-task-allow=true detected — finding emitted")
-            finding(title="Mobile Security: get-task-allow enabled (debuggable binary)",
+            finding(title="Build Configuration: get-task-allow Enabled (Debuggable Binary)",
                      severity="HIGH",
                      description=("get-task-allow=true permits attaching a debugger; "
                                    "should be FALSE in production builds."),
@@ -348,7 +348,7 @@ def analyse_entitlements(app_dir: Path, output_dir: Path) -> None:
         log("[entitlements] Checking application-identifier for wildcards...")
         if "application-identifier" in ent and "wildcard" in ent.lower():
             log("[entitlements] Wildcard application-identifier detected — finding emitted")
-            finding(title="Mobile Security: Wildcard application-identifier in entitlements",
+            finding(title="Build Configuration: Wildcard Application-Identifier in Entitlements",
                      severity="MEDIUM",
                      description=("Wildcard provisioning profile in use; key-chain "
                                    "sharing scope is over-broad."),
@@ -980,7 +980,7 @@ def analyse_ios_binary(app_dir: Path, output_dir: Path) -> None:
                    f"checks: PIE, NX, stack_canary, ARC, RPATH, signed, encrypted, symbols"])
 
     if "nx" in results and not results["nx"]:
-        finding(title="Mobile Security: NX (No-Execute) bit not confirmed",
+        finding(title="Binary Security: NX (No-Execute) Bit Not Confirmed",
                 severity="MEDIUM",
                 description=("The binary does not appear to have the NX/MH_NO_HEAP_EXECUTION flag set. "
                              "Modern iOS enforces NX when PIE is enabled; missing PIE implies NX may "
@@ -991,7 +991,7 @@ def analyse_ios_binary(app_dir: Path, output_dir: Path) -> None:
                 output_file=str(out_file))
 
     if "pie" in results and not results["pie"]:
-        finding(title="Mobile Security: PIE (Position Independent Executable) not enabled",
+        finding(title="Binary Security: PIE (Position Independent Executable) Not Enabled",
                 severity="HIGH",
                 description=("The binary is not compiled as a Position Independent Executable. "
                              "Without PIE, ASLR cannot randomise the base address, making "
@@ -1002,7 +1002,7 @@ def analyse_ios_binary(app_dir: Path, output_dir: Path) -> None:
                 output_file=str(out_file))
 
     if "stack_canary" in results and not results["stack_canary"]:
-        finding(title="Mobile Security: Stack canary (stack protector) missing",
+        finding(title="Binary Security: Stack Canary (Stack Protector) Missing",
                 severity="HIGH",
                 description=("The binary does not contain ___stack_chk_fail / ___stack_chk_guard symbols, "
                              "indicating stack canaries are not enabled. Stack-based buffer overflows "
@@ -1013,7 +1013,7 @@ def analyse_ios_binary(app_dir: Path, output_dir: Path) -> None:
                 output_file=str(out_file))
 
     if "arc" in results and not results["arc"]:
-        finding(title="Mobile Security: ARC (Automatic Reference Counting) not enabled",
+        finding(title="Binary Security: ARC (Automatic Reference Counting) Not Enabled",
                 severity="HIGH",
                 description=("The binary does not contain _objc_release symbol, suggesting Automatic "
                              "Reference Counting is not in use. Manual memory management increases "
@@ -1024,7 +1024,7 @@ def analyse_ios_binary(app_dir: Path, output_dir: Path) -> None:
                 output_file=str(out_file))
 
     if results.get("rpath"):
-        finding(title="Mobile Security: RPATH load command present in binary",
+        finding(title="Binary Security: RPATH Load Command Present in Binary",
                 severity="INFO",
                 description=("The binary contains LC_RPATH load commands, which specify runtime search "
                              "paths for dynamic libraries. On jailbroken devices this could be abused "
@@ -1035,7 +1035,7 @@ def analyse_ios_binary(app_dir: Path, output_dir: Path) -> None:
                 output_file=str(out_file))
 
     if "signed" in results and not results["signed"]:
-        finding(title="Mobile Security: Code signature missing or invalid",
+        finding(title="Binary Security: Code Signature Missing or Invalid",
                 severity="HIGH",
                 description=("The binary does not appear to be code-signed. iOS requires valid code "
                              "signatures for execution; an unsigned binary may indicate a development "
@@ -1046,7 +1046,7 @@ def analyse_ios_binary(app_dir: Path, output_dir: Path) -> None:
                 output_file=str(out_file))
 
     if "encrypted" in results and not results["encrypted"]:
-        finding(title="Mobile Security: Binary not encrypted (FairPlay DRM absent)",
+        finding(title="Binary Security: Binary Not Encrypted (FairPlay DRM Absent)",
                 severity="MEDIUM",
                 description=("The binary's LC_ENCRYPTION_INFO cryptid is 0, meaning FairPlay DRM "
                              "encryption is not applied. The binary can be directly disassembled "
@@ -1057,7 +1057,7 @@ def analyse_ios_binary(app_dir: Path, output_dir: Path) -> None:
                 output_file=str(out_file))
 
     if "symbols_stripped" in results and not results["symbols_stripped"]:
-        finding(title="Mobile Security: Debug symbols not stripped from binary",
+        finding(title="Information Disclosure: Debug Symbols Not Stripped from Binary",
                 severity="LOW",
                 description=("The binary contains debug symbols (nm reports significant symbol output). "
                              "Debug symbols reveal internal class names, method names, and variable "
@@ -1141,7 +1141,7 @@ def analyse_ios_binary_code(app_dir: Path, output_dir: Path) -> None:
 
     if insecure_found:
         log(f"[ios_code] {len(insecure_found)} insecure C API(s) detected: {', '.join(insecure_found)}")
-        finding(title=f"Mobile Security: Insecure C API usage detected ({len(insecure_found)} function(s))",
+        finding(title=f"Binary Security: Insecure C API Usage Detected ({len(insecure_found)} function(s))",
                 severity="MEDIUM",
                 description=(f"The binary imports potentially dangerous C functions: "
                              f"{', '.join(insecure_found)}. These functions are prone to buffer "
@@ -1154,7 +1154,7 @@ def analyse_ios_binary_code(app_dir: Path, output_dir: Path) -> None:
 
     if has_nslog:
         log("[ios_code] NSLog usage detected — potential sensitive info in system log")
-        finding(title="Mobile Security: NSLog usage detected in binary",
+        finding(title="Information Disclosure: NSLog Usage Detected in Binary",
                 severity="MEDIUM",
                 description=("The binary imports NSLog, which writes to the system log accessible "
                              "by any app on jailbroken devices and via Xcode console. Sensitive "
@@ -1168,7 +1168,7 @@ def analyse_ios_binary_code(app_dir: Path, output_dir: Path) -> None:
 
     if has_malloc and not has_calloc:
         log("[ios_code] malloc used without calloc — allocated memory may contain stale data")
-        finding(title="Mobile Security: malloc used without calloc (uninitialized memory risk)",
+        finding(title="Binary Security: malloc Used Without calloc (Uninitialized Memory Risk)",
                 severity="INFO",
                 description=("The binary imports malloc but not calloc. Memory allocated with "
                              "malloc is not zero-initialized and may contain sensitive data from "
@@ -1242,7 +1242,7 @@ def analyse_ios_frameworks(app_dir: Path, output_dir: Path) -> None:
 
         if weaknesses:
             weak_count += 1
-            finding(title=f"Mobile Security: Framework binary weakness in {bname}: {', '.join(weaknesses)}",
+            finding(title=f"Framework Binary Weakness: {', '.join(weaknesses)}",
                     severity="MEDIUM",
                     description=(f"The {btype} binary {bname} has the following security weakness(es): "
                                  f"{', '.join(weaknesses)}. Embedded frameworks are part of the app's "
@@ -1316,7 +1316,7 @@ def analyse_ios_permissions(app_dir: Path, output_dir: Path, plist_data: dict) -
         f"{len(dangerous_found)} classified as dangerous")
 
     for p in permissions_found:
-        finding(title=f"Mobile Security: iOS permission: {p['key']}",
+        finding(title=f"iOS Permission: {p['key']}",
                 severity="INFO",
                 description=(f"The app requests {p['key']} with reason: \"{p['reason']}\". "
                              f"Verify that this permission is necessary for the app's core functionality."),
@@ -1327,7 +1327,7 @@ def analyse_ios_permissions(app_dir: Path, output_dir: Path, plist_data: dict) -
     if len(dangerous_found) > 6:
         log(f"[ios_perms] Excessive dangerous iOS permissions ({len(dangerous_found)} > 6) — finding emitted")
         perm_list = ", ".join(p["key"] for p in dangerous_found)
-        finding(title=f"Mobile Security: Excessive iOS permissions ({len(dangerous_found)} dangerous)",
+        finding(title=f"iOS Permission: Excessive Permissions ({len(dangerous_found)} Dangerous)",
                 severity="MEDIUM",
                 description=(f"The application requests {len(dangerous_found)} dangerous iOS "
                              f"permissions: {perm_list}. Excessive permission requests expand "

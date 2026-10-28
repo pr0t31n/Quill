@@ -4,7 +4,7 @@
   "entries": [
     {
       "id": "QUILL-IOS-001",
-      "title": "Mobile Security: App Transport Security: arbitrary loads allowed",
+      "title": "Network Security: App Transport Security Arbitrary Loads Allowed",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -43,7 +43,7 @@
     },
     {
       "id": "QUILL-IOS-002",
-      "title": "Mobile Security: ATS exception allows HTTP for {dom}",
+      "title": "Network Security: ATS Exception Allows HTTP for {dom}",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -82,7 +82,7 @@
     },
     {
       "id": "QUILL-IOS-010",
-      "title": "Mobile Security: Custom URL scheme registered: {sch}://",
+      "title": "Attack Surface: Custom URL Scheme Registered: {sch}://",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -119,7 +119,7 @@
     },
     {
       "id": "QUILL-IOS-020",
-      "title": "Mobile Security: get-task-allow enabled (debuggable binary)",
+      "title": "Build Configuration: get-task-allow Enabled (Debuggable Binary)",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -158,7 +158,7 @@
     },
     {
       "id": "QUILL-IOS-021",
-      "title": "Mobile Security: Wildcard application-identifier in entitlements",
+      "title": "Build Configuration: Wildcard Application-Identifier in Entitlements",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -240,7 +240,7 @@
     },
     {
       "id": "QUILL-IOS-040",
-      "title": "Mobile Security: NX bit / no-heap-execution flag missing",
+      "title": "Binary Security: NX (No-Execute) Bit Not Confirmed",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -291,7 +291,7 @@
     },
     {
       "id": "QUILL-IOS-041",
-      "title": "Mobile Security: PIE (Position Independent Executable) not enabled",
+      "title": "Binary Security: PIE (Position Independent Executable) Not Enabled",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -342,7 +342,7 @@
     },
     {
       "id": "QUILL-IOS-042",
-      "title": "Mobile Security: Stack canary (stack protector) missing",
+      "title": "Binary Security: Stack Canary (Stack Protector) Missing",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -393,7 +393,7 @@
     },
     {
       "id": "QUILL-IOS-043",
-      "title": "Mobile Security: Automatic Reference Counting (ARC) not enabled",
+      "title": "Binary Security: ARC (Automatic Reference Counting) Not Enabled",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -444,7 +444,7 @@
     },
     {
       "id": "QUILL-IOS-044",
-      "title": "Mobile Security: RPATH load command found in binary",
+      "title": "Binary Security: RPATH Load Command Present in Binary",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -483,7 +483,7 @@
     },
     {
       "id": "QUILL-IOS-045",
-      "title": "Mobile Security: Binary is not code-signed",
+      "title": "Binary Security: Code Signature Missing or Invalid",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -532,7 +532,7 @@
     },
     {
       "id": "QUILL-IOS-046",
-      "title": "Mobile Security: Binary is not encrypted (FairPlay)",
+      "title": "Binary Security: Binary Not Encrypted (FairPlay DRM Absent)",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -581,7 +581,7 @@
     },
     {
       "id": "QUILL-IOS-047",
-      "title": "Mobile Security: Debug symbols not stripped from binary",
+      "title": "Information Disclosure: Debug Symbols Not Stripped from Binary",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -623,7 +623,7 @@
     },
     {
       "id": "QUILL-IOS-050",
-      "title": "Mobile Security: Insecure C API usage detected",
+      "title": "Binary Security: Insecure C API Usage Detected",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -675,7 +675,7 @@
     },
     {
       "id": "QUILL-IOS-051",
-      "title": "Mobile Security: NSLog usage detected in binary",
+      "title": "Information Disclosure: NSLog Usage Detected in Binary",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -721,7 +721,7 @@
     },
     {
       "id": "QUILL-IOS-052",
-      "title": "Mobile Security: malloc without calloc usage detected",
+      "title": "Binary Security: malloc Used Without calloc (Uninitialized Memory Risk)",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -762,7 +762,7 @@
     },
     {
       "id": "QUILL-IOS-055",
-      "title": "Mobile Security: Framework/dylib binary missing exploit mitigation: {check}",
+      "title": "Framework Binary Weakness: {check}",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -807,7 +807,7 @@
     },
     {
       "id": "QUILL-IOS-070",
-      "title": "Mobile Security: iOS permission requested: {permission_key}",
+      "title": "iOS Permission: {permission_key}",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -846,7 +846,7 @@
     },
     {
       "id": "QUILL-IOS-071",
-      "title": "Mobile Security: Excessive iOS permissions requested",
+      "title": "iOS Permission: Excessive Permissions",
       "aliases": [],
       "source_tools": [
         "quill"
