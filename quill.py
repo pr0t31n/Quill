@@ -60,6 +60,8 @@ _findings: list = []
 _RUN_DIR: Optional[Path] = None
 _RUNLOG = None
 _pause = None
+_APP_TARGET = ""
+_EXTRACT_BASE: Optional[Path] = None
 
 _CSV_FIELDS = ["id", "tool", "title", "datetime", "ip", "port", "hostname",
                "risk", "command", "description", "output_file", "affected",
@@ -147,6 +149,20 @@ def status(phase: str, label: str, state: str, step: str = "") -> None:
                      "ts": datetime.now().isoformat()}))
 
 
+def _clean_affected(val: str) -> str:
+    if not val:
+        return _APP_TARGET
+    if _EXTRACT_BASE is not None:
+        eb = str(_EXTRACT_BASE)
+        if val.startswith(eb):
+            val = val[len(eb):].lstrip("/")
+    elif _RUN_DIR is not None:
+        rd = str(_RUN_DIR)
+        if val.startswith(rd):
+            val = val[len(rd):].lstrip("/")
+    return val or _APP_TARGET
+
+
 def finding(*, title: str, severity: str, description: str,
              data: dict | None = None, output_file: str = "") -> None:
     of_rel = ""
@@ -156,13 +172,14 @@ def finding(*, title: str, severity: str, description: str,
         if os.path.exists(logp):
             parts.append(logp)
         of_rel = ",".join(r for r in (_rel(p) for p in parts) if r)
+    affected = _clean_affected((data or {}).get("affected", ""))
     if _us is not None:
         rec = _us.make_finding(
             tool="quill", title=title, risk=severity.upper(),
-            description=description, ip="0.0.0.0", port=0,
+            description=description, ip="", port=0,
             command=(data or {}).get("command", ""),
             output_file=of_rel,
-            affected=(data or {}).get("affected", ""),
+            affected=affected,
             remediation=(data or {}).get("remediation", ""),
             sources="quill", catalogue_id=(data or {}).get("catalogue_id", ""),
         )
@@ -447,12 +464,13 @@ def analyse_strings(app_dir: Path, output_dir: Path) -> None:
             "\n".join(f"[{label}] {match} (in {source})" for label, match, source in hits),
             encoding="utf-8")
         for label, match, source in hits[:30]:
+            clean_src = _clean_affected(source)
             finding(title=f"Information Disclosure: Potential hard-coded secret: {label}",
                      severity="HIGH",
-                     description=(f"Pattern matching {label} was found in {source}. "
+                     description=(f"Pattern matching {label} was found in {clean_src}. "
                                    "Verify whether this is a real secret or a test fixture."),
                      data={"catalogue_id": "QUILL-IOS-030",
-                           "affected": source,
+                           "affected": clean_src,
                            "evidence": match[:80]},
                      output_file=str(out_file))
     else:
@@ -809,12 +827,13 @@ def analyse_strings_apk(app_dir: Path, output_dir: Path) -> None:
             "\n".join(f"[{label}] {match} (in {source})" for label, match, source in hits),
             encoding="utf-8")
         for label, match, source in hits[:30]:
+            clean_src = _clean_affected(source)
             finding(title=f"Information Disclosure: Potential hard-coded secret: {label}",
                      severity="HIGH",
-                     description=(f"Pattern matching {label} was found in {source}. "
+                     description=(f"Pattern matching {label} was found in {clean_src}. "
                                    "Verify whether this is a real secret or a test fixture."),
                      data={"catalogue_id": "QUILL-APK-040",
-                           "affected": source,
+                           "affected": clean_src,
                            "evidence": match[:80]},
                      output_file=str(out_file))
     else:
@@ -2890,10 +2909,13 @@ def main() -> int:
         except Exception:
             pass
 
+    global _APP_TARGET, _EXTRACT_BASE
+    _APP_TARGET = Path(app_path).name
     log(f"[init] Quill v{VERSION} starting — {platform.upper()}: {app_path}")
     log(f"[init] Client: {args.client_short}, Engagement: {args.engagement_name}")
     started_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     extract_dir = project_dir / "extract"
+    _EXTRACT_BASE = extract_dir
 
     _check_pause()
     if platform == "ios":
