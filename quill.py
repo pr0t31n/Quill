@@ -3696,16 +3696,27 @@ def _get_rss_mb(pid: int) -> float:
         pass
     return 0.0
 
-def _ensure_mitmproxy_ca(mitmdump_bin: str) -> Optional[Path]:
-    """Ensure ~/.mitmproxy CA exists; auto-generate on first run."""
-    ca_dir = Path.home() / ".mitmproxy"
+_PERSISTENT_CA_DIR = Path("/opt/pr0t31n/Quill/.mitmproxy")
+
+
+def _ensure_mitmproxy_ca(mitmdump_bin: str) -> Path:
+    """Ensure persistent mitmproxy CA exists; auto-generate on first run.
+
+    Stores the CA under /opt/pr0t31n/Quill/.mitmproxy/ so it survives across
+    runs and the device only needs to install it once.
+    """
+    ca_dir = _PERSISTENT_CA_DIR
+    ca_dir.mkdir(parents=True, exist_ok=True)
+    ca_pem = ca_dir / "mitmproxy-ca.pem"
     ca_cert = ca_dir / "mitmproxy-ca-cert.pem"
-    if ca_cert.exists():
+    if ca_pem.exists() and ca_cert.exists():
+        log(f"[mitm] Using persistent CA from {ca_dir}")
         return ca_cert
-    log("[mitm] mitmproxy CA not found — generating...")
+    log("[mitm] Persistent mitmproxy CA not found — generating...")
     try:
         proc = subprocess.Popen(
-            [mitmdump_bin, "-p", "0", "--set", "flow_detail=0"],
+            [mitmdump_bin, "-p", "0", "--set", "flow_detail=0",
+             "--set", f"confdir={ca_dir}"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         import time as _t
         _t.sleep(3)
@@ -3717,10 +3728,10 @@ def _ensure_mitmproxy_ca(mitmdump_bin: str) -> Optional[Path]:
     except Exception as exc:
         log(f"[mitm] CA generation failed: {exc}")
         return None
-    if ca_cert.exists():
-        log(f"[mitm] CA cert generated: {ca_cert}")
+    if ca_pem.exists() and ca_cert.exists():
+        log(f"[mitm] Persistent CA generated: {ca_dir}")
         return ca_cert
-    log("[mitm] CA generation did not produce expected file")
+    log("[mitm] CA generation did not produce expected files")
     return None
 
 
@@ -3834,8 +3845,8 @@ def mitm_capture(target_process: str, platform: str, device: str,
                 "-p", str(port), "--ssl-insecure",
                 "--set", "flow_detail=1",
                 "--set", "stream_large_bodies=5m"]
-    if _custom_confdir:
-        mitm_cmd.extend(["--set", f"confdir={_custom_confdir}"])
+    _confdir = _custom_confdir or _PERSISTENT_CA_DIR
+    mitm_cmd.extend(["--set", f"confdir={_confdir}"])
     log(f"[mitm] Launching mitmdump: {' '.join(mitm_cmd)}")
     mitm_started = datetime.now(timezone.utc)
     mitm_proc = subprocess.Popen(mitm_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
