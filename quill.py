@@ -3750,11 +3750,27 @@ def mitm_capture(target_process: str, platform: str, device: str,
 
     mode = "transparent" if transparent else "regular"
     mitm_cmd = [mitmdump_bin, "-w", str(flows_file), "--mode", mode,
-                "-p", str(port), "--set", "flow_detail=0",
+                "-p", str(port), "--set", "flow_detail=1",
                 "--set", "stream_large_bodies=5m"]
     log(f"[mitm] Launching mitmdump: {' '.join(mitm_cmd)}")
     mitm_started = datetime.now(timezone.utc)
     mitm_proc = subprocess.Popen(mitm_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    import threading as _thr_mod
+    _mitm_lines = []
+    def _drain_mitm(stream, label):
+        try:
+            for raw in iter(stream.readline, b""):
+                line = raw.decode("utf-8", errors="replace").rstrip()
+                if line:
+                    _mitm_lines.append(line)
+                    log(f"[mitm] [{label}] {line}")
+        except Exception:
+            pass
+    _t_out = _thr_mod.Thread(target=_drain_mitm, args=(mitm_proc.stdout, "out"), daemon=True)
+    _t_err = _thr_mod.Thread(target=_drain_mitm, args=(mitm_proc.stderr, "err"), daemon=True)
+    _t_out.start()
+    _t_err.start()
 
     frida_proc = None
     if frida_bin and ssl_script_file:
@@ -3838,12 +3854,10 @@ def mitm_capture(target_process: str, platform: str, device: str,
         mitm_proc.kill()
         mitm_proc.wait()
     mitm_ended = datetime.now(timezone.utc)
-    mitm_stdout, mitm_stderr = "", ""
-    try:
-        mitm_stdout = mitm_proc.stdout.read().decode("utf-8", errors="replace")[:8_000_000]
-        mitm_stderr = mitm_proc.stderr.read().decode("utf-8", errors="replace")[:8_000_000]
-    except Exception:
-        pass
+    _t_out.join(timeout=5)
+    _t_err.join(timeout=5)
+    mitm_stdout = "\n".join(_mitm_lines)[:8_000_000]
+    mitm_stderr = ""
     if frida_proc is not None:
         try:
             frida_proc.kill()
