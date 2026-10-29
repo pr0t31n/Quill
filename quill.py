@@ -4559,8 +4559,9 @@ def main() -> int:
     _mitm_only = args.mitm and not _dynamic_only and args.mode != "full"
     if not app_path and not _dynamic_only and not _mitm_only:
         p.error("--app (or --ipa) is required unless --mode dynamic or --mitm")
-    if not app_path and _dynamic_only and not args.target_process:
-        p.error("--target-process is required when running dynamic-only without --app")
+    if not app_path and _dynamic_only and not args.target_process and not args.mitm:
+        p.error("--target-process is required when running dynamic-only without --app "
+                "(not needed for MITM-only — pass --mitm)")
 
     platform = args.platform
     if platform == "auto":
@@ -4736,10 +4737,14 @@ def main() -> int:
             if not target_process and app_path:
                 target_process = Path(app_path).stem
             if not target_process:
-                err("[main] Cannot resolve dynamic target — no --target-process and no app binary")
-                return 1
+                if run_mitm:
+                    log("[main] No target process — skipping Frida dynamic analysis (MITM-only)")
+                else:
+                    err("[main] Cannot resolve dynamic target — no --target-process and no app binary")
+                    return 1
+        if target_process:
             log(f"[main] Dynamic target process resolved: {target_process}")
-        dynamic_analysis(target_process, platform, args.device, project_dir)
+            dynamic_analysis(target_process, platform, args.device, project_dir)
 
     _check_pause()
     if run_mitm:
