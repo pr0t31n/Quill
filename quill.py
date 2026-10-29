@@ -2849,6 +2849,694 @@ def dynamic_analysis(target: str, platform: str, device: str, output_dir: Path) 
     status("dynamic", "Dynamic analysis", "complete")
 
 
+# ── MITM traffic analysis ────────────────────────────────────────────────────
+
+_SENSITIVE_URL_PATTERNS = {
+    "password": re.compile(r'(?:password|passwd|pwd|pass)=[^&]+', re.IGNORECASE),
+    "token": re.compile(r'(?:token|access_token|auth_token|session_id|sessionid|sid)=[^&]+', re.IGNORECASE),
+    "api_key": re.compile(r'(?:api_?key|apikey|app_?key|secret)=[^&]+', re.IGNORECASE),
+    "ssn": re.compile(r'\b\d{3}-\d{2}-\d{4}\b'),
+    "email_param": re.compile(r'(?:email|user|username)=[^&]*@[^&]+', re.IGNORECASE),
+    "credit_card": re.compile(r'\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b'),
+}
+
+_API_KEY_PATTERNS = {
+    "aws_access_key": re.compile(r'AKIA[0-9A-Z]{16}'),
+    "google_api_key": re.compile(r'AIza[0-9A-Za-z\-_]{35}'),
+    "firebase_key": re.compile(r'AAAA[A-Za-z0-9_-]{7}:[A-Za-z0-9_-]{140}'),
+    "github_token": re.compile(r'gh[ps]_[A-Za-z0-9_]{36,255}'),
+    "slack_token": re.compile(r'xox[baprs]-[0-9A-Za-z\-]{10,}'),
+    "stripe_key": re.compile(r'[sr]k_(live|test)_[0-9a-zA-Z]{24,}'),
+    "twilio_key": re.compile(r'SK[0-9a-fA-F]{32}'),
+    "generic_bearer": re.compile(r'Bearer\s+[A-Za-z0-9\-_.~+/]+=*', re.IGNORECASE),
+}
+
+_TRACKER_DOMAINS = {
+    "google-analytics.com": "Google Analytics",
+    "analytics.google.com": "Google Analytics",
+    "firebaselogging.googleapis.com": "Firebase Analytics",
+    "firebaseinstallations.googleapis.com": "Firebase",
+    "app-measurement.com": "Google App Measurement",
+    "graph.facebook.com": "Facebook SDK",
+    "www.facebook.com": "Facebook SDK",
+    "app.adjust.com": "Adjust",
+    "app.appsflyer.com": "AppsFlyer",
+    "api2.branch.io": "Branch.io",
+    "api.crashlytics.com": "Crashlytics",
+    "settings.crashlytics.com": "Crashlytics",
+    "api.amplitude.com": "Amplitude",
+    "api.mixpanel.com": "Mixpanel",
+    "api.segment.io": "Segment",
+    "dc.services.visualstudio.com": "App Center",
+    "mobile.launchdarkly.com": "LaunchDarkly",
+    "sentry.io": "Sentry",
+}
+
+_SECURITY_HEADERS = {
+    "strict-transport-security": "Missing HSTS Header",
+    "content-security-policy": "Missing Content-Security-Policy",
+    "x-content-type-options": "Missing X-Content-Type-Options",
+    "x-frame-options": "Missing X-Frame-Options",
+}
+
+_AUTH_URL_PATTERNS = re.compile(
+    r'(?:login|signin|sign-in|authenticate|auth|oauth|token|session)', re.IGNORECASE)
+
+_PII_BODY_PATTERNS = {
+    "ssn": re.compile(r'\b\d{3}-\d{2}-\d{4}\b'),
+    "credit_card": re.compile(r'\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))\d{8,12}\b'),
+    "email": re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'),
+    "phone": re.compile(r'\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b'),
+    "password_field": re.compile(r'"(?:password|passwd|pwd|pass|secret)"\s*:\s*"[^"]*"', re.IGNORECASE),
+}
+
+
+def _safe_evidence_path(method: str, url_path: str) -> str:
+    safe = re.sub(r'[^a-zA-Z0-9._/-]', '_', url_path)[:80]
+    safe = safe.strip("/").replace("/", "__")
+    return f"{method}__{safe}" if safe else method
+
+
+def _write_mitm_evidence(flow, evidence_dir: Path, seq: int):
+    ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    try:
+        from urllib.parse import urlparse
+        path_part = urlparse(flow.request.url).path or "/"
+    except Exception:
+        path_part = "/"
+    safe_dir = evidence_dir / _safe_evidence_path(flow.request.method, path_part)
+    safe_dir.mkdir(parents=True, exist_ok=True)
+    prefix = f"req_{seq:04d}_{ts_str}"
+    req_lines = [f"{flow.request.method} {flow.request.url} {flow.request.http_version}"]
+    for k, v in flow.request.headers.items():
+        req_lines.append(f"{k}: {v}")
+    req_lines.append("")
+    body = (flow.request.content or b"").decode("utf-8", errors="replace")[:50000]
+    if body:
+        req_lines.append(body)
+    req_file = safe_dir / f"{prefix}_request.txt"
+    req_file.write_text("\n".join(req_lines), encoding="utf-8")
+    resp_lines = [f"{flow.response.http_version} {flow.response.status_code} "
+                  f"{flow.response.reason}"]
+    for k, v in flow.response.headers.items():
+        resp_lines.append(f"{k}: {v}")
+    resp_lines.append("")
+    rbody = (flow.response.content or b"").decode("utf-8", errors="replace")[:50000]
+    if rbody:
+        resp_lines.append(rbody)
+    resp_file = safe_dir / f"{prefix}_response.txt"
+    resp_file.write_text("\n".join(resp_lines), encoding="utf-8")
+    dur = 0
+    if hasattr(flow, 'timestamp_end') and hasattr(flow, 'timestamp_start'):
+        dur = (flow.timestamp_end or 0) - (flow.timestamp_start or 0)
+    log_file = safe_dir / f"{prefix}.log"
+    log_file.write_text("\n".join([
+        f"# Tool: mitmdump (MITM proxy)",
+        f"# Request: {flow.request.method} {flow.request.url}",
+        f"# Status: {flow.response.status_code}",
+        f"# Duration: {dur:.3f}s",
+        f"# Request size: {len(flow.request.content or b'')} bytes",
+        f"# Response size: {len(flow.response.content or b'')} bytes",
+    ]), encoding="utf-8")
+    return _rel(str(req_file)), _rel(str(resp_file)), _rel(str(log_file))
+
+
+def mitm_capture(target_process: str, platform: str, device: str,
+                 output_dir: Path, *, duration: int = 120, port: int = 8080,
+                 transparent: bool = False) -> Optional[Path]:
+    _check_pause()
+    _save_checkpoint()
+    log(f"[mitm] Starting MITM traffic capture — duration={duration}s, port={port}, "
+        f"transparent={transparent}")
+    status("mitm_capture", "MITM traffic capture", "running")
+    mitmdump_bin = shutil.which("mitmdump")
+    if not mitmdump_bin:
+        err("mitmdump not available — install mitmproxy for MITM analysis")
+        status("mitm_capture", "MITM traffic capture", "skipped")
+        return None
+    frida_bin = shutil.which("frida")
+    if not frida_bin:
+        err("frida not available — MITM requires Frida for SSL bypass")
+        status("mitm_capture", "MITM traffic capture", "skipped")
+        return None
+    mitm_dir = output_dir / "mitm"
+    mitm_dir.mkdir(parents=True, exist_ok=True)
+    (mitm_dir / "evidence").mkdir(parents=True, exist_ok=True)
+    flows_file = mitm_dir / "traffic_capture.mitm"
+    ssl_script = _FRIDA_SSL_PINNING_SCRIPT if platform == "android" else _FRIDA_IOS_SSL_SCRIPT
+    ssl_script_file = mitm_dir / "ssl_bypass.js"
+    ssl_script_file.write_text(ssl_script, encoding="utf-8")
+
+    adb_bin = shutil.which("adb")
+    proxy_configured = False
+    host_ip = "127.0.0.1"
+    if platform == "android" and adb_bin:
+        try:
+            r = subprocess.run([adb_bin, "shell", "ip", "route", "show", "default"],
+                               capture_output=True, text=True, timeout=5)
+            m = re.search(r'via\s+(\d+\.\d+\.\d+\.\d+)', r.stdout)
+            if m:
+                host_ip = m.group(1)
+        except Exception:
+            pass
+        try:
+            subprocess.run([adb_bin, "shell", "settings", "put", "global",
+                            "http_proxy", f"{host_ip}:{port}"],
+                           capture_output=True, timeout=5)
+            proxy_configured = True
+            log(f"[mitm] Android proxy configured via adb: {host_ip}:{port}")
+        except Exception as exc:
+            log(f"[mitm] Could not auto-configure Android proxy: {exc}")
+    if not proxy_configured:
+        log(f"[mitm] Configure device proxy manually: {host_ip}:{port}")
+        status("mitm_capture", f"Set device proxy to {host_ip}:{port}", "waiting")
+
+    mode = "transparent" if transparent else "regular"
+    mitm_cmd = [mitmdump_bin, "-w", str(flows_file), "--mode", mode,
+                "-p", str(port), "--set", "flow_detail=0",
+                "--set", "stream_large_bodies=5m"]
+    log(f"[mitm] Launching mitmdump: {' '.join(mitm_cmd)}")
+    mitm_started = datetime.now(timezone.utc)
+    mitm_proc = subprocess.Popen(mitm_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    frida_cmd = [frida_bin]
+    if device:
+        frida_cmd.extend(["-D", device])
+    frida_cmd.extend(["-n", target_process, "-l", str(ssl_script_file),
+                      "--no-pause", "-q"])
+    log(f"[mitm] Launching Frida SSL bypass: {' '.join(frida_cmd)}")
+    frida_proc = None
+    try:
+        frida_proc = subprocess.Popen(frida_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except Exception as exc:
+        log(f"[mitm] Frida launch failed (capture continues without SSL bypass): {exc}")
+
+    import time as _time_mod
+    log(f"[mitm] Capturing traffic for {duration}s — exercise the app now...")
+    status("mitm_capture", f"Capturing traffic ({duration}s)", "running")
+    elapsed = 0
+    while elapsed < duration:
+        _check_pause()
+        wait = min(10, duration - elapsed)
+        _time_mod.sleep(wait)
+        elapsed += wait
+        if elapsed < duration and elapsed % 30 == 0:
+            log(f"[mitm] Capture in progress — {elapsed}s / {duration}s")
+            status("mitm_capture", f"Capturing ({elapsed}/{duration}s)", "running")
+
+    log("[mitm] Capture duration reached — stopping proxy and Frida...")
+    import signal as _sig_mod
+    try:
+        mitm_proc.send_signal(_sig_mod.SIGINT)
+        mitm_proc.wait(timeout=10)
+    except Exception:
+        mitm_proc.kill()
+        mitm_proc.wait()
+    mitm_ended = datetime.now(timezone.utc)
+    mitm_stdout, mitm_stderr = "", ""
+    try:
+        mitm_stdout = mitm_proc.stdout.read().decode("utf-8", errors="replace")[:8_000_000]
+        mitm_stderr = mitm_proc.stderr.read().decode("utf-8", errors="replace")[:8_000_000]
+    except Exception:
+        pass
+    if frida_proc is not None:
+        try:
+            frida_proc.kill()
+            frida_proc.wait(timeout=5)
+        except Exception:
+            pass
+    if proxy_configured and adb_bin:
+        try:
+            subprocess.run([adb_bin, "shell", "settings", "put", "global",
+                            "http_proxy", ":0"], capture_output=True, timeout=5)
+            log("[mitm] Android proxy cleared")
+        except Exception:
+            pass
+    if _ur is not None:
+        try:
+            _ur.write_tool_log(
+                cmd=mitm_cmd, started=mitm_started.isoformat(),
+                ended=mitm_ended.isoformat(), exit_code=mitm_proc.returncode,
+                stdout=mitm_stdout, stderr=mitm_stderr,
+                tool_name="mitmdump", tool_path=mitmdump_bin,
+                output_file=str(flows_file),
+                errors_log=(str(_RUN_DIR / "errors.log") if _RUN_DIR else None))
+        except Exception:
+            pass
+    if not flows_file.exists() or flows_file.stat().st_size == 0:
+        err("No traffic captured — ensure the app was exercised and proxy was configured")
+        status("mitm_capture", "MITM traffic capture", "error")
+        return None
+    log(f"[mitm] Capture complete — {flows_file.stat().st_size / 1024:.1f} KB")
+    status("mitm_capture", "MITM traffic capture", "complete")
+    return flows_file
+
+
+def mitm_analyse(output_dir: Path, flows_file: Path) -> None:
+    _check_pause()
+    log("[mitm-analyse] Starting traffic analysis...")
+    status("mitm_analyse", "MITM traffic analysis", "running")
+    try:
+        from mitmproxy.io import FlowReader
+        from mitmproxy import http as mhttp
+    except ImportError:
+        err("mitmproxy Python package not available — cannot analyse flows")
+        status("mitm_analyse", "MITM traffic analysis", "skipped")
+        return
+    mitm_dir = output_dir / "mitm"
+    evidence_dir = mitm_dir / "evidence"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    flows = []
+    try:
+        with open(flows_file, "rb") as f:
+            reader = FlowReader(f)
+            for flow in reader.stream():
+                if isinstance(flow, mhttp.HTTPFlow) and flow.response:
+                    flows.append(flow)
+    except Exception as exc:
+        err(f"Failed to read flow file: {exc}")
+        status("mitm_analyse", "MITM traffic analysis", "error")
+        return
+    if not flows:
+        log("[mitm-analyse] No HTTP flows found in capture")
+        status("mitm_analyse", "MITM traffic analysis", "complete")
+        return
+    log(f"[mitm-analyse] Loaded {len(flows)} HTTP flow(s)")
+    _mitm_check_cleartext(flows, evidence_dir)
+    _mitm_check_sensitive_urls(flows, evidence_dir)
+    _mitm_check_sensitive_bodies(flows, evidence_dir)
+    _mitm_check_security_headers(flows, evidence_dir)
+    _mitm_check_api_keys(flows, evidence_dir)
+    _mitm_check_cookies(flows, evidence_dir)
+    _mitm_check_certs(flows, evidence_dir)
+    _mitm_check_trackers(flows, evidence_dir)
+    _mitm_check_auth(flows, evidence_dir)
+    _mitm_check_tls_versions(flows, evidence_dir)
+    _mitm_write_har(flows, mitm_dir / "traffic_capture.har")
+    _mitm_write_api_inventory(flows, output_dir / "api_inventory.json")
+    _mitm_write_traffic_analysis(flows, output_dir / "traffic_analysis.json")
+    log("[mitm-analyse] Traffic analysis complete")
+    status("mitm_analyse", "MITM traffic analysis", "complete")
+
+
+def _mitm_check_cleartext(flows, evidence_dir):
+    seq, seen = 0, set()
+    for flow in flows:
+        if flow.request.scheme == "http":
+            host = flow.request.host
+            if host in seen:
+                continue
+            seen.add(host)
+            seq += 1
+            ev = _write_mitm_evidence(flow, evidence_dir, seq)
+            finding(title=f"Cleartext HTTP Traffic to {host}", severity="HIGH",
+                    description=f"The application sent HTTP (unencrypted) traffic to {host}. "
+                                f"All data in transit is visible to anyone on the network path.",
+                    data={"catalogue_id": "QUILL-MITM-001",
+                          "affected": f"{host}:{flow.request.port}",
+                          "command": f"mitmdump — {flow.request.method} {flow.request.url}",
+                          "remediation": "Enforce HTTPS for all communications. Implement HSTS."
+                    }, output_file=ev[0] if ev else "")
+
+
+def _mitm_check_sensitive_urls(flows, evidence_dir):
+    seq = 1000
+    for flow in flows:
+        url = flow.request.url
+        for pat_name, pat in _SENSITIVE_URL_PATTERNS.items():
+            if pat.search(url):
+                seq += 1
+                ev = _write_mitm_evidence(flow, evidence_dir, seq)
+                finding(title=f"Sensitive Data in URL ({pat_name})", severity="HIGH",
+                        description=f"The request URL contains {pat_name} data: "
+                                    f"{flow.request.method} {flow.request.pretty_host}"
+                                    f"{flow.request.path}. URLs are logged, cached, and "
+                                    f"recorded in browser history.",
+                        data={"catalogue_id": "QUILL-MITM-002",
+                              "affected": flow.request.pretty_host,
+                              "command": f"{flow.request.method} {url[:200]}",
+                              "remediation": "Move sensitive data from URL parameters "
+                                             "to request headers or POST body."
+                        }, output_file=ev[0] if ev else "")
+                break
+
+
+def _mitm_check_sensitive_bodies(flows, evidence_dir):
+    seq = 2000
+    for flow in flows:
+        for src_name, content in [("request", flow.request.content),
+                                  ("response", flow.response.content)]:
+            if not content:
+                continue
+            text = content.decode("utf-8", errors="replace")[:100000]
+            for pat_name, pat in _PII_BODY_PATTERNS.items():
+                if pat.search(text):
+                    seq += 1
+                    ev = _write_mitm_evidence(flow, evidence_dir, seq)
+                    finding(title=f"Sensitive Data in {src_name.title()} Body ({pat_name})",
+                            severity="MEDIUM",
+                            description=f"The {src_name} body to "
+                                        f"{flow.request.pretty_host} contains {pat_name} data.",
+                            data={"catalogue_id": "QUILL-MITM-003",
+                                  "affected": flow.request.pretty_host,
+                                  "command": f"{flow.request.method} {flow.request.url[:200]}",
+                                  "remediation": "Minimize sensitive data. Use tokenization for PII."
+                            }, output_file=ev[0] if ev else "")
+                    break
+
+
+def _mitm_check_security_headers(flows, evidence_dir):
+    seq, seen = 3000, set()
+    for flow in flows:
+        if flow.request.scheme != "https":
+            continue
+        host = flow.request.pretty_host
+        resp_headers = {k.lower(): v for k, v in flow.response.headers.items()}
+        for hdr, label in _SECURITY_HEADERS.items():
+            key = (host, hdr)
+            if key in seen or hdr in resp_headers:
+                continue
+            seen.add(key)
+            seq += 1
+            ev = _write_mitm_evidence(flow, evidence_dir, seq)
+            finding(title=f"{label}: {host}", severity="MEDIUM",
+                    description=f"Response from {host} is missing the {hdr} header.",
+                    data={"catalogue_id": "QUILL-MITM-004",
+                          "affected": host,
+                          "command": f"{flow.request.method} {flow.request.url[:200]}",
+                          "remediation": f"Configure the server to include {hdr} in responses."
+                    }, output_file=ev[0] if ev else "")
+
+
+def _mitm_check_api_keys(flows, evidence_dir):
+    seq, seen_keys = 4000, set()
+    for flow in flows:
+        for src_name, text in [
+            ("request headers", "\n".join(f"{k}: {v}" for k, v in flow.request.headers.items())),
+            ("request body", (flow.request.content or b"").decode("utf-8", errors="replace")[:100000]),
+            ("request URL", flow.request.url),
+            ("response body", (flow.response.content or b"").decode("utf-8", errors="replace")[:100000]),
+        ]:
+            if not text:
+                continue
+            for key_type, pat in _API_KEY_PATTERNS.items():
+                if key_type == "generic_bearer" and src_name != "request headers":
+                    continue
+                if pat.search(text):
+                    dedup = (flow.request.pretty_host, key_type)
+                    if dedup in seen_keys:
+                        continue
+                    seen_keys.add(dedup)
+                    seq += 1
+                    ev = _write_mitm_evidence(flow, evidence_dir, seq)
+                    finding(title=f"API Key/Token in Traffic ({key_type}): "
+                                  f"{flow.request.pretty_host}",
+                            severity="HIGH",
+                            description=f"A {key_type} pattern was found in {src_name} "
+                                        f"to {flow.request.pretty_host}.",
+                            data={"catalogue_id": "QUILL-MITM-005",
+                                  "affected": flow.request.pretty_host,
+                                  "command": f"{flow.request.method} {flow.request.url[:200]}",
+                                  "remediation": "Rotate the exposed key. Use short-lived tokens."
+                            }, output_file=ev[0] if ev else "")
+
+
+def _mitm_check_cookies(flows, evidence_dir):
+    seq, seen = 5000, set()
+    for flow in flows:
+        for hdr_val in flow.response.headers.get_all("set-cookie"):
+            parts = hdr_val.split(";")
+            if not parts:
+                continue
+            cookie_name = parts[0].split("=")[0].strip()
+            flags_lower = hdr_val.lower()
+            host = flow.request.pretty_host
+            issues = []
+            if "secure" not in flags_lower:
+                issues.append("Secure")
+            if "httponly" not in flags_lower:
+                issues.append("HttpOnly")
+            if "samesite" not in flags_lower:
+                issues.append("SameSite")
+            if not issues:
+                continue
+            key = (host, cookie_name)
+            if key in seen:
+                continue
+            seen.add(key)
+            seq += 1
+            ev = _write_mitm_evidence(flow, evidence_dir, seq)
+            finding(title=f"Insecure Cookie: {cookie_name} on {host}", severity="MEDIUM",
+                    description=f"Cookie '{cookie_name}' from {host} is missing: "
+                                f"{', '.join(issues)}.",
+                    data={"catalogue_id": "QUILL-MITM-006",
+                          "affected": host,
+                          "command": f"Set-Cookie: {hdr_val[:200]}",
+                          "remediation": f"Add {', '.join(issues)} flag(s) to the cookie."
+                    }, output_file=ev[0] if ev else "")
+
+
+def _mitm_check_certs(flows, evidence_dir):
+    seq, seen = 6000, set()
+    for flow in flows:
+        if not hasattr(flow, 'server_conn') or flow.server_conn is None:
+            continue
+        sc = flow.server_conn
+        host = flow.request.pretty_host
+        if host in seen:
+            continue
+        if hasattr(sc, 'error') and sc.error:
+            seen.add(host)
+            seq += 1
+            ev = _write_mitm_evidence(flow, evidence_dir, seq)
+            finding(title=f"TLS Certificate Issue: {host}", severity="HIGH",
+                    description=f"mitmproxy recorded a TLS error for {host}: {sc.error}.",
+                    data={"catalogue_id": "QUILL-MITM-007",
+                          "affected": host,
+                          "remediation": "Use valid certificates from a trusted CA. "
+                                         "Implement certificate pinning."
+                    }, output_file=ev[0] if ev else "")
+
+
+def _mitm_check_trackers(flows, evidence_dir):
+    seq, seen = 7000, set()
+    for flow in flows:
+        host = flow.request.host
+        for domain, tracker_name in _TRACKER_DOMAINS.items():
+            if host == domain or host.endswith("." + domain):
+                if tracker_name in seen:
+                    continue
+                seen.add(tracker_name)
+                body = (flow.request.content or b"").decode("utf-8", errors="replace")[:50000]
+                data_types = []
+                if re.search(r'(?:device_?id|idfa|gaid|advertisingId)', body, re.IGNORECASE):
+                    data_types.append("device identifiers")
+                if re.search(r'(?:latitude|longitude|lat|lng|geo)', body, re.IGNORECASE):
+                    data_types.append("location data")
+                if re.search(r'(?:email|user_?name|user_?id)', body, re.IGNORECASE):
+                    data_types.append("user identifiers")
+                seq += 1
+                ev = _write_mitm_evidence(flow, evidence_dir, seq)
+                data_desc = f" Data includes: {', '.join(data_types)}." if data_types else ""
+                finding(title=f"Third-Party Data Leakage: {tracker_name}", severity="MEDIUM",
+                        description=f"The app sends data to {tracker_name} ({host}).{data_desc}",
+                        data={"catalogue_id": "QUILL-MITM-008",
+                              "affected": host,
+                              "command": f"{flow.request.method} {flow.request.url[:200]}",
+                              "remediation": "Review data sent to third-party analytics. "
+                                             "Minimize PII. Disclose in privacy policy."
+                        }, output_file=ev[0] if ev else "")
+                break
+
+
+def _mitm_check_auth(flows, evidence_dir):
+    seq, seen = 9000, set()
+    for flow in flows:
+        if not _AUTH_URL_PATTERNS.search(flow.request.url.lower()):
+            continue
+        host = flow.request.pretty_host
+        if flow.request.scheme == "http":
+            key = ("http_auth", host)
+            if key not in seen:
+                seen.add(key)
+                seq += 1
+                ev = _write_mitm_evidence(flow, evidence_dir, seq)
+                finding(title=f"Unencrypted Authentication: {host}", severity="CRITICAL",
+                        description=f"Authentication request to {host} sent over plaintext HTTP. "
+                                    f"Credentials are fully exposed to network observers.",
+                        data={"catalogue_id": "QUILL-MITM-010",
+                              "affected": host,
+                              "command": f"{flow.request.method} {flow.request.url[:200]}",
+                              "remediation": "All auth endpoints MUST use HTTPS. Implement HSTS."
+                        }, output_file=ev[0] if ev else "")
+        if _SENSITIVE_URL_PATTERNS["password"].search(flow.request.url):
+            key = ("url_creds", host)
+            if key not in seen:
+                seen.add(key)
+                seq += 1
+                ev = _write_mitm_evidence(flow, evidence_dir, seq)
+                finding(title=f"Credentials in URL on Auth Endpoint: {host}",
+                        severity="CRITICAL",
+                        description=f"Password data in URL of auth request to {host}. "
+                                    f"URLs are logged, cached, and in browser history.",
+                        data={"catalogue_id": "QUILL-MITM-010",
+                              "affected": host,
+                              "command": f"{flow.request.method} {flow.request.url[:200]}",
+                              "remediation": "Send credentials in request body, not URL. Use HTTPS."
+                        }, output_file=ev[0] if ev else "")
+
+
+def _mitm_check_tls_versions(flows, evidence_dir):
+    seq, seen = 10000, set()
+    deprecated = {"TLSv1", "TLSv1.0", "TLSv1.1", "TLS 1.0", "TLS 1.1",
+                  "SSLv2", "SSLv3", "SSL 2.0", "SSL 3.0"}
+    for flow in flows:
+        if not hasattr(flow, 'server_conn') or flow.server_conn is None:
+            continue
+        host = flow.request.pretty_host
+        if host in seen:
+            continue
+        tls_ver = getattr(flow.server_conn, 'tls_version', None) or ""
+        if tls_ver and tls_ver in deprecated:
+            seen.add(host)
+            seq += 1
+            ev = _write_mitm_evidence(flow, evidence_dir, seq)
+            finding(title=f"Deprecated TLS Version ({tls_ver}): {host}", severity="MEDIUM",
+                    description=f"Connection to {host} used {tls_ver}, which has known "
+                                f"vulnerabilities. TLS 1.2 is the minimum acceptable version.",
+                    data={"catalogue_id": "QUILL-MITM-011",
+                          "affected": host,
+                          "remediation": "Configure server to support TLS 1.2+ only."
+                    }, output_file=ev[0] if ev else "")
+
+
+def _mitm_write_har(flows, har_path: Path) -> None:
+    entries = []
+    for flow in flows:
+        started = ""
+        if hasattr(flow, 'timestamp_start') and flow.timestamp_start:
+            started = datetime.fromtimestamp(flow.timestamp_start, tz=timezone.utc).isoformat()
+        dur = 0
+        if hasattr(flow, 'timestamp_end') and hasattr(flow, 'timestamp_start'):
+            dur = ((flow.timestamp_end or 0) - (flow.timestamp_start or 0)) * 1000
+        entry = {
+            "startedDateTime": started, "time": round(dur, 2),
+            "request": {
+                "method": flow.request.method, "url": flow.request.url,
+                "httpVersion": flow.request.http_version,
+                "headers": [{"name": k, "value": v} for k, v in flow.request.headers.items()],
+                "headersSize": -1, "bodySize": len(flow.request.content or b""),
+            },
+            "response": {
+                "status": flow.response.status_code,
+                "statusText": flow.response.reason or "",
+                "httpVersion": flow.response.http_version,
+                "headers": [{"name": k, "value": v} for k, v in flow.response.headers.items()],
+                "headersSize": -1, "bodySize": len(flow.response.content or b""),
+            },
+            "timings": {"send": -1, "wait": round(dur, 2), "receive": -1},
+        }
+        if flow.request.content:
+            entry["request"]["postData"] = {
+                "mimeType": flow.request.headers.get("content-type", ""),
+                "text": flow.request.content.decode("utf-8", errors="replace")[:50000],
+            }
+        entries.append(entry)
+    har = {"log": {"version": "1.2",
+                   "creator": {"name": "Quill MITM", "version": VERSION},
+                   "entries": entries}}
+    try:
+        har_path.write_text(json.dumps(har, indent=2, default=str), encoding="utf-8")
+        log(f"[mitm-intel] HAR file written ({len(entries)} entries)")
+    except Exception as exc:
+        err(f"HAR write failed: {exc}")
+
+
+def _mitm_write_api_inventory(flows, inv_path: Path) -> None:
+    endpoints = {}
+    for flow in flows:
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(flow.request.url)
+        except Exception:
+            continue
+        key = (flow.request.method, parsed.hostname, parsed.path)
+        if key not in endpoints:
+            endpoints[key] = {
+                "method": flow.request.method, "host": parsed.hostname or "",
+                "path": parsed.path or "/", "scheme": parsed.scheme,
+                "port": parsed.port or (443 if parsed.scheme == "https" else 80),
+                "content_types": set(), "status_codes": set(),
+                "has_auth": False, "auth_type": "", "request_count": 0,
+                "query_params": set(),
+            }
+        ep = endpoints[key]
+        ep["request_count"] += 1
+        ct = flow.response.headers.get("content-type", "").split(";")[0].strip()
+        if ct:
+            ep["content_types"].add(ct)
+        ep["status_codes"].add(flow.response.status_code)
+        auth = flow.request.headers.get("authorization", "")
+        if auth:
+            ep["has_auth"] = True
+            ep["auth_type"] = auth.split(" ")[0] if " " in auth else "custom"
+        if parsed.query:
+            for p in parsed.query.split("&"):
+                pn = p.split("=")[0]
+                if pn:
+                    ep["query_params"].add(pn)
+    inventory = []
+    for ep in endpoints.values():
+        ep["content_types"] = sorted(ep["content_types"])
+        ep["status_codes"] = sorted(ep["status_codes"])
+        ep["query_params"] = sorted(ep["query_params"])
+        inventory.append(ep)
+    inventory.sort(key=lambda e: (e["host"], e["path"], e["method"]))
+    try:
+        inv_path.write_text(json.dumps({"endpoints": inventory, "total": len(inventory)},
+                                        indent=2, default=str), encoding="utf-8")
+        log(f"[mitm-intel] API inventory written ({len(inventory)} endpoints)")
+    except Exception as exc:
+        err(f"API inventory write failed: {exc}")
+
+
+def _mitm_write_traffic_analysis(flows, analysis_path: Path) -> None:
+    hosts, methods, status_codes, content_types = {}, {}, {}, {}
+    total_req, total_resp = 0, 0
+    for flow in flows:
+        host = flow.request.pretty_host
+        if host not in hosts:
+            hosts[host] = {"request_count": 0, "schemes": set()}
+        hosts[host]["request_count"] += 1
+        hosts[host]["schemes"].add(flow.request.scheme)
+        total_req += len(flow.request.content or b"")
+        total_resp += len(flow.response.content or b"")
+        methods[flow.request.method] = methods.get(flow.request.method, 0) + 1
+        sc = flow.response.status_code
+        status_codes[sc] = status_codes.get(sc, 0) + 1
+        ct = flow.response.headers.get("content-type", "").split(";")[0].strip()
+        if ct:
+            content_types[ct] = content_types.get(ct, 0) + 1
+    host_list = sorted(hosts.items(), key=lambda h: h[1]["request_count"], reverse=True)
+    analysis = {
+        "total_flows": len(flows), "total_request_bytes": total_req,
+        "total_response_bytes": total_resp, "unique_hosts": len(hosts),
+        "methods": methods,
+        "status_codes": {str(k): v for k, v in sorted(status_codes.items())},
+        "content_types": content_types,
+        "hosts": [{"host": h, "request_count": d["request_count"],
+                   "schemes": sorted(d["schemes"]),
+                   "is_tracker": any(h == td or h.endswith("." + td)
+                                     for td in _TRACKER_DOMAINS)}
+                  for h, d in host_list],
+    }
+    try:
+        analysis_path.write_text(json.dumps(analysis, indent=2, default=str), encoding="utf-8")
+        log(f"[mitm-intel] Traffic analysis written ({len(flows)} flows, {len(hosts)} hosts)")
+    except Exception as exc:
+        err(f"Traffic analysis write failed: {exc}")
+
+
 # ── Shared utilities ──────────────────────────────────────────────────────────
 
 def _risk_counts(findings: list) -> dict:
@@ -2895,6 +3583,14 @@ def main() -> int:
     p.add_argument("--client-short", default="default")
     p.add_argument("--client-name", default="", help="Full client name (defaults to --client-short)")
     p.add_argument("--engagement-name", default="quill run", help="Engagement name for meta.json")
+    p.add_argument("--mitm", action="store_true",
+                     help="Enable MITM traffic capture and analysis (requires mitmproxy + Frida)")
+    p.add_argument("--mitm-duration", type=int, default=120,
+                     help="MITM capture duration in seconds (default: 120)")
+    p.add_argument("--mitm-port", type=int, default=8080,
+                     help="mitmproxy listen port (default: 8080)")
+    p.add_argument("--mitm-transparent", action="store_true",
+                     help="Use transparent proxy mode (requires iptables/pf)")
     p.add_argument("--project", help="Override project output directory")
     p.add_argument("--version", action="store_true")
     args = p.parse_args()
@@ -3043,6 +3739,31 @@ def main() -> int:
                 target_process = Path(app_path).stem
             log(f"[main] Dynamic target process resolved: {target_process}")
         dynamic_analysis(target_process, platform, args.device, project_dir)
+
+    _check_pause()
+    if args.mitm:
+        log("[main] MITM traffic analysis requested — resolving target process...")
+        mitm_target = args.target_process
+        if not mitm_target:
+            if platform == "android":
+                manifest = extract_dir / "AndroidManifest.xml"
+                if not manifest.exists() and app_dir:
+                    manifest = app_dir / "AndroidManifest.xml"
+                if manifest.exists():
+                    try:
+                        tree = ET.parse(manifest)
+                        mitm_target = tree.getroot().get("package", "")
+                    except Exception:
+                        pass
+            if not mitm_target:
+                mitm_target = Path(app_path).stem
+            log(f"[main] MITM target process: {mitm_target}")
+        flows_file = mitm_capture(
+            mitm_target, platform, args.device, project_dir,
+            duration=args.mitm_duration, port=args.mitm_port,
+            transparent=args.mitm_transparent)
+        if flows_file:
+            mitm_analyse(project_dir, flows_file)
 
     ended_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     log(f"[finalize] Analysis phases complete — writing output files...")
