@@ -698,6 +698,16 @@ def analyse_manifest(app_dir: Path, output_dir: Path) -> dict:
                            "remediation": "Set usesCleartextTraffic=false and use a network security config for exceptions."},
                      output_file=str(out_file))
 
+        defined_perms = set()
+        for pdef in root.findall("permission"):
+            pn = _attr(pdef, "name")
+            if pn:
+                defined_perms.add(pn)
+        for pdef in root.findall("permission-group"):
+            pn = _attr(pdef, "name")
+            if pn:
+                defined_perms.add(pn)
+
         log("[manifest] Enumerating exported components...")
         _exported_count = 0
         for comp_type in ("activity", "service", "receiver", "provider"):
@@ -723,6 +733,16 @@ def analyse_manifest(app_dir: Path, output_dir: Path) -> dict:
                                  data={"catalogue_id": "QUILL-APK-010", "affected": f"{package}/{name}",
                                        "remediation": f"Set android:exported=false or add a permission attribute to {name}."},
                                  output_file=str(out_file))
+                if is_exported and perm and perm not in defined_perms and not perm.startswith("android.permission."):
+                    finding(title=f"Exported {comp_type} protected by undefined permission: {name}",
+                             severity="HIGH",
+                             description=(f"The {comp_type} {name} is exported and protected by permission "
+                                          f"'{perm}', which is not defined in the app's manifest. Any app "
+                                          f"can declare this permission and access the component."),
+                             data={"catalogue_id": "QUILL-APK-011", "affected": f"{package}/{name}",
+                                   "remediation": f"Define the permission '{perm}' with <permission> in the manifest, "
+                                                  "or use a system-defined permission."},
+                             output_file=str(out_file))
 
     log(f"[manifest] Components scanned — {len(result['components'])} total, {_exported_count} exported")
 
@@ -1011,7 +1031,9 @@ def _check_binary_mitigations(binary: Path, output_dir: Path,
         if cp4 is not None:
             cs_out = (cp4.stdout or "") + (cp4.stderr or "")
             out_file_cs.write_text(cs_out, encoding="utf-8")
-            results["signed"] = "Signature=" in cs_out or "valid on disk" in cs_out.lower()
+            results["signed"] = ("Signature size=" in cs_out or
+                                  "Signature=" in cs_out or
+                                  "valid on disk" in cs_out.lower())
             log(f"{pfx}codesign: signed={results.get('signed')}")
 
     # ── nm: debug symbols stripped ──
@@ -1024,9 +1046,16 @@ def _check_binary_mitigations(binary: Path, output_dir: Path,
             nm_out = cp5.stdout or ""
             nm_stderr = cp5.stderr or ""
             out_file_nm.write_text(nm_out, encoding="utf-8")
-            sym_count = len(nm_out.strip().splitlines())
-            results["symbols_stripped"] = sym_count < 10 or "no symbols" in nm_stderr.lower()
-            log(f"{pfx}nm: {sym_count} symbol(s), stripped={results.get('symbols_stripped')}")
+            nm_lines = nm_out.strip().splitlines()
+            local_syms = 0
+            for _nmline in nm_lines:
+                _parts = _nmline.strip().split()
+                if len(_parts) >= 2:
+                    _tc = _parts[0] if len(_parts[0]) == 1 else (_parts[1] if len(_parts) >= 2 and len(_parts[1]) == 1 else "")
+                    if _tc and _tc != "U" and _tc != "u":
+                        local_syms += 1
+            results["symbols_stripped"] = local_syms < 10 or "no symbols" in nm_stderr.lower()
+            log(f"{pfx}nm: {len(nm_lines)} total, {local_syms} local symbol(s), stripped={results.get('symbols_stripped')}")
 
     return results
 
@@ -1630,6 +1659,49 @@ _SAST_PATTERNS = [
      "the clipboard after a short timeout."),
 ]
 
+_DEX_SAST_PATTERNS = [
+    (re.compile(r"(?:AES|DES|Blowfish|RC[24])/CBC/PKCS[57]Padding"),
+     "Cipher with CBC/PKCS padding (padding oracle risk)", "HIGH", "QUILL-APK-114",
+     "The application uses CBC mode with PKCS5/PKCS7 padding. This combination "
+     "is vulnerable to padding oracle attacks that can decrypt ciphertext "
+     "without the key.",
+     "Use AES/GCM/NoPadding which provides authenticated encryption."),
+    (re.compile(r"(?:^|\W)(?:SHA-?1)(?:\W|$)", re.IGNORECASE),
+     "Weak SHA-1 hash algorithm", "MEDIUM", "QUILL-APK-117",
+     "The application uses SHA-1 which is deprecated and vulnerable to "
+     "collision attacks (SHAttered, 2017).",
+     "Migrate to SHA-256 or SHA-3 for all cryptographic hashing."),
+    (re.compile(r"(?:^|\W)MD5(?:\W|$)"),
+     "Weak MD5 hash algorithm", "MEDIUM", "QUILL-APK-118",
+     "The application uses MD5 which is cryptographically broken.",
+     "Replace MD5 with SHA-256 or SHA-3."),
+    (re.compile(r"java\.util\.Random"),
+     "Insecure random number generator (java.util.Random)", "MEDIUM", "QUILL-APK-119",
+     "The application uses java.util.Random which is not cryptographically "
+     "secure. Its output is predictable given enough observations.",
+     "Use java.security.SecureRandom for security-sensitive randomness."),
+    (re.compile(r"getExternal(?:StorageDirectory|FilesDir|CacheDir)"),
+     "External storage access", "LOW", "QUILL-APK-134",
+     "The application accesses external storage which is world-readable "
+     "on Android < 10. Sensitive files stored here are accessible by any app.",
+     "Use internal storage (getFilesDir()) for sensitive data."),
+    (re.compile(r"createTempFile"),
+     "Temporary file creation", "LOW", "QUILL-APK-135",
+     "The application creates temporary files which may be created in a "
+     "shared directory, accessible by other apps.",
+     "Create temp files in the app's internal cache directory."),
+    (re.compile(r"DES(?:ede)?/"),
+     "Weak DES/3DES cipher usage", "MEDIUM", "QUILL-APK-115",
+     "The application references DES or 3DES. DES uses a 56-bit key "
+     "and is trivially brute-forced on modern hardware.",
+     "Replace DES/3DES with AES-256."),
+    (re.compile(r"/ECB/"),
+     "ECB cipher mode (pattern leakage)", "HIGH", "QUILL-APK-116",
+     "The application uses ECB cipher mode. ECB leaks plaintext patterns "
+     "since identical plaintext blocks produce identical ciphertext blocks.",
+     "Use CBC with random IV, or preferably GCM mode."),
+]
+
 _LOG_CALL_RX = re.compile(r"\bLog\.[dviwe]\s*\(")
 
 
@@ -1691,6 +1763,13 @@ def analyse_android_code(app_dir: Path, output_dir: Path) -> None:
                 pattern_hits[cat_id]["files"].append("(DEX strings)")
         lc = len(_LOG_CALL_RX.findall(dex_text))
         log_call_count += lc
+        for pat, title, sev, cat_id, desc, remed in _DEX_SAST_PATTERNS:
+            if cat_id not in pattern_hits:
+                pattern_hits[cat_id] = {"title": title, "severity": sev, "cat_id": cat_id,
+                                        "desc": desc, "remed": remed, "files": []}
+            if pat.search(dex_text) and not pattern_hits[cat_id]["files"]:
+                pattern_hits[cat_id]["files"].append("(DEX strings)")
+                log(f"[sast] DEX-level match: {title} ({cat_id})")
 
     result = {"patterns": {}, "log_call_count": log_call_count}
     finding_count = 0
@@ -1859,6 +1938,116 @@ def detect_trackers(app_dir: Path, output_dir: Path) -> None:
 
     log(f"[trackers] Tracker SDK detection complete — {len(found_trackers)} tracker(s) found")
     status("trackers", "Tracker SDK detection", "complete")
+
+
+# ── iOS tracker SDK detection ────────────────────────────────────────────────
+
+_KNOWN_IOS_TRACKERS = {
+    "GoogleAnalytics": "Google Analytics",
+    "FirebaseAnalytics": "Firebase Analytics",
+    "FBSDKCoreKit": "Facebook SDK",
+    "FBSDKLoginKit": "Facebook Login",
+    "GoogleMobileAds": "Google AdMob",
+    "GADMobileAds": "Google AdMob",
+    "Adjust": "Adjust",
+    "Mixpanel": "Mixpanel",
+    "MixpanelAPI": "Mixpanel",
+    "Amplitude": "Amplitude",
+    "Branch": "Branch.io",
+    "Segment": "Segment",
+    "Braze": "Braze",
+    "Crashlytics": "Crashlytics",
+    "NewRelicAgent": "New Relic",
+    "Bugsnag": "Bugsnag",
+    "Instabug": "Instabug",
+    "Countly": "Countly",
+    "CleverTap": "CleverTap",
+    "OneSignal": "OneSignal",
+    "AppsFlyerLib": "AppsFlyer",
+    "Flurry": "Flurry",
+    "Sentry": "Sentry",
+    "ComScore": "comScore",
+    "MoEngage": "MoEngage",
+    "Airship": "Urban Airship",
+    "Leanplum": "Leanplum",
+    "AppDynamics": "AppDynamics",
+    "Batch": "Batch",
+}
+
+
+def detect_trackers_ios(app_dir: Path, output_dir: Path) -> None:
+    _check_pause()
+    _save_checkpoint()
+    log(f"[trackers_ios] Starting iOS tracker SDK detection for {app_dir.name}...")
+    status("trackers_ios", "iOS tracker SDK detection", "running")
+
+    out_file = output_dir / "tracker_analysis.json"
+    found: list = []
+    seen_names: set = set()
+
+    frameworks_dir = app_dir / "Frameworks"
+    if frameworks_dir.exists():
+        for fw in frameworks_dir.iterdir():
+            if fw.is_dir() or fw.suffix == ".framework":
+                fw_stem = fw.stem
+                for key, name in _KNOWN_IOS_TRACKERS.items():
+                    if key.lower() in fw_stem.lower() and name not in seen_names:
+                        seen_names.add(name)
+                        found.append({"package": fw_stem, "name": name,
+                                      "method": "framework_dir", "evidence": fw.name})
+                        break
+            if fw.suffix == ".dylib":
+                for key, name in _KNOWN_IOS_TRACKERS.items():
+                    if key.lower() in fw.stem.lower() and name not in seen_names:
+                        seen_names.add(name)
+                        found.append({"package": fw.stem, "name": name,
+                                      "method": "dylib", "evidence": fw.name})
+                        break
+
+    strings_bin = shutil.which("strings")
+    if strings_bin:
+        main_bin = _find_ios_main_binary(app_dir)
+        if main_bin:
+            cp = _run_tool_cmd([strings_bin, str(main_bin)],
+                               output_file=str(output_dir / "tracker_ios_strings.txt"),
+                               timeout=120, tool_name="strings")
+            if cp is not None:
+                bin_text = cp.stdout or ""
+                for key, name in _KNOWN_IOS_TRACKERS.items():
+                    if name not in seen_names and key in bin_text:
+                        seen_names.add(name)
+                        found.append({"package": key, "name": name,
+                                      "method": "binary_strings"})
+
+    result = {"trackers_found": len(found), "trackers": found}
+    out_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    _analysis_log(out_file, "iOS tracker SDK detection",
+                  [f"app_dir: {app_dir}",
+                   f"trackers_found: {len(found)}"])
+
+    for t in found:
+        log(f"[trackers_ios] Tracker detected: {t['name']} ({t.get('package', '')})")
+        finding(title=f"Tracker SDK detected: {t['name']}",
+                severity="INFO",
+                description=(f"The iOS application embeds the {t['name']} tracking SDK "
+                             f"({t.get('package', '')}). Tracking SDKs collect user "
+                             f"behaviour data and may transmit it to third-party servers."),
+                data={"catalogue_id": "QUILL-IOS-060",
+                      "affected": t.get("package", t["name"])},
+                output_file=str(out_file))
+
+    if len(found) > 5:
+        names = ", ".join(t["name"] for t in found)
+        finding(title=f"Excessive tracking SDKs ({len(found)} detected)",
+                severity="LOW",
+                description=(f"The iOS application embeds {len(found)} tracking SDKs: {names}. "
+                             f"Each SDK increases attack surface and privacy impact."),
+                data={"catalogue_id": "QUILL-IOS-061", "affected": names,
+                      "remediation": "Review tracker necessity. Remove unused SDKs."},
+                output_file=str(out_file))
+
+    log(f"[trackers_ios] iOS tracker detection complete — {len(found)} tracker(s)")
+    status("trackers_ios", "iOS tracker SDK detection", "complete")
 
 
 # ── APKiD / packer detection ─────────────────────────────────────────────────
@@ -2058,6 +2247,12 @@ def detect_firebase(app_dir: Path, output_dir: Path) -> None:
                                timeout=120, tool_name="strings")
             if cp is not None:
                 all_text += (cp.stdout or "")
+        for arsc in app_dir.rglob("resources.arsc"):
+            cp = _run_tool_cmd([strings_bin, str(arsc)],
+                               output_file=str(output_dir / "firebase_strings_resources_arsc.txt"),
+                               timeout=120, tool_name="strings")
+            if cp is not None:
+                all_text += (cp.stdout or "")
 
     db_urls = list(set(_FIREBASE_DB_RX.findall(all_text)))
     storage_urls = list(set(_FIREBASE_STORAGE_RX.findall(all_text)))
@@ -2139,6 +2334,51 @@ def detect_firebase(app_dir: Path, output_dir: Path) -> None:
 
 # ── Certificate / signing analysis ───────────────────────────────────────────
 
+
+def _detect_apk_signing_python(apk_path: Path) -> dict:
+    """Detect APK signing schemes via pure Python (no Java required)."""
+    result = {"v1": False, "v2": False, "v3": False, "certs": []}
+    try:
+        with zipfile.ZipFile(apk_path, "r") as z:
+            names = z.namelist()
+            has_sf = any(n.startswith("META-INF/") and n.endswith(".SF") for n in names)
+            has_sig = any(n.startswith("META-INF/") and
+                         any(n.endswith(e) for e in (".RSA", ".DSA", ".EC"))
+                         for n in names)
+            result["v1"] = has_sf and has_sig
+    except Exception:
+        pass
+    try:
+        with open(apk_path, "rb") as f:
+            f.seek(0, 2)
+            sz = f.tell()
+            chunk = min(sz, 2 * 1024 * 1024)
+            f.seek(sz - chunk)
+            data = f.read(chunk)
+        magic = b"APK Sig Block 42"
+        mi = data.rfind(magic)
+        if mi > 8:
+            block_sz = int.from_bytes(data[mi - 8:mi], "little")
+            content_sz = block_sz - 24
+            start = mi - 8 - content_sz
+            if 0 <= start < mi - 8 and content_sz > 0 and content_sz < 10_000_000:
+                block = data[start:mi - 8]
+                p = 0
+                while p + 12 <= len(block):
+                    ps = int.from_bytes(block[p:p + 8], "little")
+                    if ps < 4 or p + 8 + ps > len(block):
+                        break
+                    pid = int.from_bytes(block[p + 8:p + 12], "little")
+                    if pid == 0x7109871a:
+                        result["v2"] = True
+                    elif pid in (0xf05368c, 0x1b93ad61):
+                        result["v3"] = True
+                    p += 8 + ps
+    except Exception:
+        pass
+    return result
+
+
 def analyse_signing(apk_path: Path, app_dir: Path, output_dir: Path) -> None:
     _check_pause()
     _save_checkpoint()
@@ -2185,14 +2425,27 @@ def analyse_signing(apk_path: Path, app_dir: Path, output_dir: Path) -> None:
                 raw = (cp.stdout or "") + (cp.stderr or "")
                 raw_file.write_text(raw, encoding="utf-8")
                 result["raw_output"] = raw[:5000]
-                result["v1"] = "jar verified" in raw.lower()
-                for line in raw.splitlines():
-                    if "CN=" in line or "Owner:" in line or "Issuer:" in line:
-                        result["certs"].append(line.strip())
+                if "unable to locate" in raw.lower() or "error:" in raw.lower():
+                    log("[signing] jarsigner failed (Java not available) — using Python fallback")
+                    py_result = _detect_apk_signing_python(apk_path)
+                    result["tool_used"] = "python-zip"
+                    result["v1"] = py_result["v1"]
+                    result["v2"] = py_result["v2"]
+                    result["v3"] = py_result["v3"]
+                    result["certs"] = py_result["certs"]
+                else:
+                    result["v1"] = "jar verified" in raw.lower()
+                    for line in raw.splitlines():
+                        if "CN=" in line or "Owner:" in line or "Issuer:" in line:
+                            result["certs"].append(line.strip())
         else:
-            log("[signing] Neither apksigner nor jarsigner available — skipping signing analysis")
-            status("signing", "APK signing analysis", "skipped")
-            return
+            log("[signing] Neither apksigner nor jarsigner available — using Python fallback")
+            py_result = _detect_apk_signing_python(apk_path)
+            result["tool_used"] = "python-zip"
+            result["v1"] = py_result["v1"]
+            result["v2"] = py_result["v2"]
+            result["v3"] = py_result["v3"]
+            result["certs"] = py_result["certs"]
 
     out_file.write_text(json.dumps({k: v for k, v in result.items() if k != "raw_output"},
                                     indent=2), encoding="utf-8")
@@ -3537,6 +3790,138 @@ def _mitm_write_traffic_analysis(flows, analysis_path: Path) -> None:
         err(f"Traffic analysis write failed: {exc}")
 
 
+# ── Intelligence extraction — domains, URLs, emails ──────────────────────────
+
+_URL_RX = re.compile(r'https?://[A-Za-z0-9._~:/?#\[\]@!$&\'()*+,;=%\-]+', re.ASCII)
+_EMAIL_RX = re.compile(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}')
+
+_JUNK_DOMAINS = frozenset({
+    "schemas.android.com", "www.w3.org", "ns.adobe.com", "xmlpull.org",
+    "xml.org", "purl.org", "apache.org", "example.com", "example.org",
+    "example.net", "localhost", "schema.org", "json-schema.org",
+    "0.0.0.0", "127.0.0.1", "::1",
+})
+
+_JUNK_EMAIL_DOMAINS = frozenset({
+    "example.com", "example.org", "example.net", "test.com",
+    "localhost", "noreply.com",
+})
+
+
+def _gather_all_text(app_dir: Path, output_dir: Path, platform: str) -> str:
+    text_exts = {"xml", "json", "plist", "strings", "txt", "cfg", "yml", "yaml",
+                 "properties", "smali", "java", "kt", "swift", "m", "h"}
+    parts = []
+    for ext in text_exts:
+        for f in app_dir.rglob(f"*.{ext}"):
+            try:
+                parts.append(f.read_text(encoding="utf-8", errors="ignore")[:200000])
+            except Exception:
+                continue
+
+    strings_bin = shutil.which("strings")
+    if strings_bin:
+        if platform == "android":
+            for dex in app_dir.rglob("*.dex"):
+                cp = _run_tool_cmd([strings_bin, str(dex)],
+                                   output_file=str(output_dir / f"intel_strings_{dex.name}.txt"),
+                                   timeout=120, tool_name="strings")
+                if cp is not None:
+                    parts.append(cp.stdout or "")
+            for arsc in app_dir.rglob("resources.arsc"):
+                cp = _run_tool_cmd([strings_bin, str(arsc)],
+                                   output_file=str(output_dir / "intel_strings_resources_arsc.txt"),
+                                   timeout=120, tool_name="strings")
+                if cp is not None:
+                    parts.append(cp.stdout or "")
+        else:
+            main_bin = _find_ios_main_binary(app_dir)
+            if main_bin:
+                cp = _run_tool_cmd([strings_bin, str(main_bin)],
+                                   output_file=str(output_dir / "intel_strings_binary.txt"),
+                                   timeout=120, tool_name="strings")
+                if cp is not None:
+                    parts.append(cp.stdout or "")
+    return "\n".join(parts)
+
+
+def extract_domains_and_urls(app_dir: Path, output_dir: Path, platform: str) -> dict:
+    _check_pause()
+    _save_checkpoint()
+    log(f"[intel_urls] Extracting domains and URLs for {app_dir.name}...")
+    status("intel_urls", "URL & domain extraction", "running")
+
+    all_text = _gather_all_text(app_dir, output_dir, platform)
+    raw_urls = _URL_RX.findall(all_text)
+
+    urls_dedup: dict = {}
+    domains: dict = {}
+    for u in raw_urls:
+        u_clean = u.rstrip(".,;:'\")>")
+        if u_clean not in urls_dedup:
+            urls_dedup[u_clean] = True
+        try:
+            host = u_clean.split("//", 1)[1].split("/", 1)[0].split(":", 1)[0].lower()
+        except IndexError:
+            continue
+        if host and host not in _JUNK_DOMAINS and not host.replace(".", "").isdigit():
+            domains.setdefault(host, 0)
+            domains[host] += 1
+
+    sorted_domains = sorted(domains.items(), key=lambda x: -x[1])
+    sorted_urls = sorted(urls_dedup.keys())
+
+    result = {
+        "unique_urls": len(sorted_urls),
+        "unique_domains": len(sorted_domains),
+        "domains": [{"domain": d, "count": c} for d, c in sorted_domains],
+        "urls": sorted_urls[:2000],
+    }
+
+    out_file = output_dir / "url_domain_analysis.json"
+    out_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    _analysis_log(out_file, "URL & domain extraction",
+                  [f"unique_urls: {len(sorted_urls)}",
+                   f"unique_domains: {len(sorted_domains)}"])
+
+    log(f"[intel_urls] Extraction complete — {len(sorted_urls)} URLs, {len(sorted_domains)} domains")
+    status("intel_urls", "URL & domain extraction", "complete")
+    return result
+
+
+def extract_emails(app_dir: Path, output_dir: Path, platform: str) -> dict:
+    _check_pause()
+    _save_checkpoint()
+    log(f"[intel_emails] Extracting emails for {app_dir.name}...")
+    status("intel_emails", "Email extraction", "running")
+
+    all_text = _gather_all_text(app_dir, output_dir, platform)
+    raw_emails = _EMAIL_RX.findall(all_text)
+
+    emails_dedup: dict = {}
+    for e in raw_emails:
+        e_lower = e.lower()
+        domain = e_lower.rsplit("@", 1)[-1]
+        if domain not in _JUNK_EMAIL_DOMAINS and not e_lower.endswith(".png") and \
+           not e_lower.endswith(".jpg") and not e_lower.endswith(".xml"):
+            emails_dedup.setdefault(e_lower, e)
+
+    sorted_emails = sorted(emails_dedup.values())
+    result = {
+        "unique_emails": len(sorted_emails),
+        "emails": sorted_emails[:500],
+    }
+
+    out_file = output_dir / "email_analysis.json"
+    out_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    _analysis_log(out_file, "Email extraction",
+                  [f"unique_emails: {len(sorted_emails)}"])
+
+    log(f"[intel_emails] Extraction complete — {len(sorted_emails)} emails")
+    status("intel_emails", "Email extraction", "complete")
+    return result
+
+
 # ── Shared utilities ──────────────────────────────────────────────────────────
 
 def _risk_counts(findings: list) -> dict:
@@ -3689,6 +4074,12 @@ def main() -> int:
         _check_pause()
         analyse_ios_permissions(app_dir, project_dir, plist_data)
         _check_pause()
+        detect_trackers_ios(app_dir, project_dir)
+        _check_pause()
+        url_domain_intel = extract_domains_and_urls(app_dir, project_dir, "ios")
+        _check_pause()
+        email_intel = extract_emails(app_dir, project_dir, "ios")
+        _check_pause()
         compute_file_hashes(Path(app_path), project_dir)
     elif platform == "android":
         app_dir = extract_apk(Path(app_path), extract_dir)
@@ -3716,6 +4107,10 @@ def main() -> int:
         analyse_browsable_activities(app_dir, project_dir, manifest_data)
         _check_pause()
         analyse_behaviour_patterns(app_dir, project_dir, manifest_data)
+        _check_pause()
+        url_domain_intel = extract_domains_and_urls(app_dir, project_dir, "android")
+        _check_pause()
+        email_intel = extract_emails(app_dir, project_dir, "android")
         _check_pause()
         compute_file_hashes(Path(app_path), project_dir)
 
@@ -3984,7 +4379,8 @@ def _write_intel_files(project_dir: Path, platform: str, app_name: str) -> None:
                     for sch in (s.get("CFBundleURLSchemes") or []):
                         app_entry_d["deep_links"].append({"scheme": sch})
         app_entry_d["firebase"] = {}
-        app_entry_d["trackers"] = []
+        ios_trackers = _load("tracker_analysis.json")
+        app_entry_d["trackers"] = (ios_trackers.get("trackers", []) if isinstance(ios_trackers, dict) else []) or []
     data_flow["apps"].append(app_entry_d)
     try:
         (project_dir / "data.json").write_text(
@@ -3992,7 +4388,37 @@ def _write_intel_files(project_dir: Path, platform: str, app_name: str) -> None:
     except Exception:
         pass
 
-    log(f"[finalize] Intelligence files written (components/permissions/hardening/data)")
+    # ── domains.json ──
+    url_domain = _load("url_domain_analysis.json")
+    if url_domain:
+        domains_data = {"apps": []}
+        app_entry_dom = dict(app_entry)
+        app_entry_dom["unique_domains"] = url_domain.get("unique_domains", 0)
+        app_entry_dom["unique_urls"] = url_domain.get("unique_urls", 0)
+        app_entry_dom["domains"] = url_domain.get("domains", [])
+        app_entry_dom["urls"] = url_domain.get("urls", [])[:500]
+        domains_data["apps"].append(app_entry_dom)
+        try:
+            (project_dir / "domains.json").write_text(
+                json.dumps(domains_data, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    # ── emails.json ──
+    email_data = _load("email_analysis.json")
+    if email_data:
+        emails_out = {"apps": []}
+        app_entry_em = dict(app_entry)
+        app_entry_em["unique_emails"] = email_data.get("unique_emails", 0)
+        app_entry_em["emails"] = email_data.get("emails", [])
+        emails_out["apps"].append(app_entry_em)
+        try:
+            (project_dir / "emails.json").write_text(
+                json.dumps(emails_out, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    log(f"[finalize] Intelligence files written (components/permissions/hardening/data/domains/emails)")
 
 
 def _generate_cross_tool_action_items(project_dir: Path) -> None:
