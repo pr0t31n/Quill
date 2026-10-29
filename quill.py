@@ -3752,19 +3752,40 @@ def mitm_capture(target_process: str, platform: str, device: str,
         log("[mitm] Frida SSL bypass skipped — using external bypass (Burp / manual)")
 
     import time as _time_mod
-    log(f"[mitm] Capturing traffic for {duration}s — exercise the app now...")
-    status("mitm_capture", f"Capturing traffic ({duration}s)", "running")
+    mitm_sentinel = output_dir / "_mitm_stop"
+    if mitm_sentinel.exists():
+        mitm_sentinel.unlink()
+    if _MANAGED:
+        import json as _json_mod
+        print("__CRUCIBLE_STATUS__:" + _json_mod.dumps({
+            "phase": "mitm_capture", "label": "MITM capture active",
+            "state": "running", "mitm_active": True}), flush=True)
+    log(f"[mitm] Capturing traffic — exercise the app now (max {duration}s, "
+        f"stop via Crucible or touch {mitm_sentinel.name})")
+    status("mitm_capture", "Capturing traffic — stop when ready", "running")
     elapsed = 0
+    stopped_by_user = False
     while elapsed < duration:
         _check_pause()
-        wait = min(10, duration - elapsed)
+        if mitm_sentinel.exists():
+            stopped_by_user = True
+            log("[mitm] Stop signal received — ending capture")
+            try:
+                mitm_sentinel.unlink()
+            except OSError:
+                pass
+            break
+        wait = min(5, duration - elapsed)
         _time_mod.sleep(wait)
         elapsed += wait
-        if elapsed < duration and elapsed % 30 == 0:
-            log(f"[mitm] Capture in progress — {elapsed}s / {duration}s")
-            status("mitm_capture", f"Capturing ({elapsed}/{duration}s)", "running")
+        if elapsed % 30 == 0:
+            log(f"[mitm] Capture in progress — {elapsed}s elapsed")
+            status("mitm_capture", f"Capturing ({elapsed}s elapsed)", "running")
 
-    log("[mitm] Capture duration reached — stopping proxy and Frida...")
+    if stopped_by_user:
+        log(f"[mitm] User stopped capture after {elapsed}s — stopping proxy and Frida...")
+    else:
+        log(f"[mitm] Max duration reached ({duration}s) — stopping proxy and Frida...")
     import signal as _sig_mod
     try:
         mitm_proc.send_signal(_sig_mod.SIGINT)
@@ -4474,8 +4495,9 @@ def main() -> int:
                      help="Enable MITM traffic capture and analysis (works with any mode; "
                           "does NOT require Frida — chain Burp → Quill proxy → internet "
                           "for manual pinning bypass flows)")
-    p.add_argument("--mitm-duration", type=int, default=120,
-                     help="MITM capture duration in seconds (default: 120)")
+    p.add_argument("--mitm-duration", type=int, default=3600,
+                     help="Max MITM capture duration in seconds (default: 3600); "
+                          "capture stops earlier when user signals via Crucible or sentinel file")
     p.add_argument("--mitm-port", type=int, default=8080,
                      help="mitmproxy listen port (default: 8080)")
     p.add_argument("--mitm-transparent", action="store_true",
