@@ -3691,16 +3691,18 @@ def mitm_capture(target_process: str, platform: str, device: str,
         return None
     frida_bin = shutil.which("frida")
     if not frida_bin:
-        err("frida not available — MITM requires Frida for SSL bypass")
-        status("mitm_capture", "MITM traffic capture", "skipped")
-        return None
+        log("[mitm] Frida not available — MITM capture will run without SSL bypass "
+            "(use Burp or manual bypass upstream)")
+
     mitm_dir = output_dir / "mitm"
     mitm_dir.mkdir(parents=True, exist_ok=True)
     (mitm_dir / "evidence").mkdir(parents=True, exist_ok=True)
     flows_file = mitm_dir / "traffic_capture.mitm"
-    ssl_script = _FRIDA_SSL_PINNING_SCRIPT if platform == "android" else _FRIDA_IOS_SSL_SCRIPT
-    ssl_script_file = mitm_dir / "ssl_bypass.js"
-    ssl_script_file.write_text(ssl_script, encoding="utf-8")
+    ssl_script_file = None
+    if frida_bin:
+        ssl_script = _FRIDA_SSL_PINNING_SCRIPT if platform == "android" else _FRIDA_IOS_SSL_SCRIPT
+        ssl_script_file = mitm_dir / "ssl_bypass.js"
+        ssl_script_file.write_text(ssl_script, encoding="utf-8")
 
     adb_bin = shutil.which("adb")
     proxy_configured = False
@@ -3734,17 +3736,20 @@ def mitm_capture(target_process: str, platform: str, device: str,
     mitm_started = datetime.now(timezone.utc)
     mitm_proc = subprocess.Popen(mitm_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    frida_cmd = [frida_bin]
-    if device:
-        frida_cmd.extend(["-D", device])
-    frida_cmd.extend(["-n", target_process, "-l", str(ssl_script_file),
-                      "--no-pause", "-q"])
-    log(f"[mitm] Launching Frida SSL bypass: {' '.join(frida_cmd)}")
     frida_proc = None
-    try:
-        frida_proc = subprocess.Popen(frida_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    except Exception as exc:
-        log(f"[mitm] Frida launch failed (capture continues without SSL bypass): {exc}")
+    if frida_bin and ssl_script_file:
+        frida_cmd = [frida_bin]
+        if device:
+            frida_cmd.extend(["-D", device])
+        frida_cmd.extend(["-n", target_process, "-l", str(ssl_script_file),
+                          "--no-pause", "-q"])
+        log(f"[mitm] Launching Frida SSL bypass: {' '.join(frida_cmd)}")
+        try:
+            frida_proc = subprocess.Popen(frida_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except Exception as exc:
+            log(f"[mitm] Frida launch failed (capture continues without SSL bypass): {exc}")
+    else:
+        log("[mitm] Frida SSL bypass skipped — using external bypass (Burp / manual)")
 
     import time as _time_mod
     log(f"[mitm] Capturing traffic for {duration}s — exercise the app now...")
@@ -4456,14 +4461,19 @@ def main() -> int:
     p.add_argument("--ipa", help="Path to .ipa archive (legacy, same as --app)")
     p.add_argument("--platform", choices=["ios", "android", "auto"], default="auto",
                      help="Target platform (default: auto-detect from file extension)")
-    p.add_argument("--dynamic", action="store_true", help="Enable Frida-based dynamic analysis")
-    p.add_argument("--device", default="", help="Frida device ID (for --dynamic)")
+    p.add_argument("--mode", choices=["static", "dynamic", "full"], default="full",
+                     help="Analysis mode: static (no device needed), dynamic (Frida + MITM only), "
+                          "full (static + dynamic, default)")
+    p.add_argument("--dynamic", action="store_true", help="Enable Frida-based dynamic analysis (legacy, same as --mode full)")
+    p.add_argument("--device", default="", help="Frida device ID (for dynamic/full mode)")
     p.add_argument("--target-process", default="", help="Target process name for dynamic analysis")
     p.add_argument("--client-short", default="default")
     p.add_argument("--client-name", default="", help="Full client name (defaults to --client-short)")
     p.add_argument("--engagement-name", default="quill run", help="Engagement name for meta.json")
     p.add_argument("--mitm", action="store_true",
-                     help="Enable MITM traffic capture and analysis (requires mitmproxy + Frida)")
+                     help="Enable MITM traffic capture and analysis (works with any mode; "
+                          "does NOT require Frida — chain Burp → Quill proxy → internet "
+                          "for manual pinning bypass flows)")
     p.add_argument("--mitm-duration", type=int, default=120,
                      help="MITM capture duration in seconds (default: 120)")
     p.add_argument("--mitm-port", type=int, default=8080,
@@ -4540,80 +4550,99 @@ def main() -> int:
         except Exception:
             pass
 
+    mode = args.mode
+    if args.dynamic and mode == "full":
+        pass
+    elif args.dynamic and mode == "static":
+        mode = "full"
+    run_static = mode in ("static", "full")
+    run_dynamic = mode in ("dynamic", "full")
+    run_mitm = args.mitm
+
     global _APP_TARGET, _EXTRACT_BASE
     _APP_TARGET = Path(app_path).name
     log(f"[init] Quill v{VERSION} starting — {platform.upper()}: {app_path}")
+    log(f"[init] Mode: {mode} (static={run_static}, dynamic={run_dynamic}, mitm={run_mitm})")
     log(f"[init] Client: {args.client_short}, Engagement: {args.engagement_name}")
     started_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     extract_dir = project_dir / "extract"
     _EXTRACT_BASE = extract_dir
 
     _check_pause()
+    app_dir = None
+    manifest_data = {}
+    plist_data = {}
     if platform == "ios":
         app_dir = extract_ipa(Path(app_path), extract_dir)
         if not app_dir:
             return 1
-        _check_pause()
-        plist_data = analyse_info_plist(app_dir, project_dir)
-        _check_pause()
-        analyse_entitlements(app_dir, project_dir)
-        _check_pause()
-        analyse_strings(app_dir, project_dir)
-        _check_pause()
-        analyse_ios_binary(app_dir, project_dir)
-        _check_pause()
-        analyse_ios_binary_code(app_dir, project_dir)
-        _check_pause()
-        analyse_ios_frameworks(app_dir, project_dir)
-        _check_pause()
-        analyse_ios_permissions(app_dir, project_dir, plist_data)
-        _check_pause()
-        analyse_ios_runtime_protections(app_dir, project_dir)
-        _check_pause()
-        detect_trackers_ios(app_dir, project_dir)
-        _check_pause()
-        url_domain_intel = extract_domains_and_urls(app_dir, project_dir, "ios")
-        _check_pause()
-        email_intel = extract_emails(app_dir, project_dir, "ios")
-        _check_pause()
-        compute_file_hashes(Path(app_path), project_dir)
+        if run_static:
+            _check_pause()
+            plist_data = analyse_info_plist(app_dir, project_dir)
+            _check_pause()
+            analyse_entitlements(app_dir, project_dir)
+            _check_pause()
+            analyse_strings(app_dir, project_dir)
+            _check_pause()
+            analyse_ios_binary(app_dir, project_dir)
+            _check_pause()
+            analyse_ios_binary_code(app_dir, project_dir)
+            _check_pause()
+            analyse_ios_frameworks(app_dir, project_dir)
+            _check_pause()
+            analyse_ios_permissions(app_dir, project_dir, plist_data)
+            _check_pause()
+            analyse_ios_runtime_protections(app_dir, project_dir)
+            _check_pause()
+            detect_trackers_ios(app_dir, project_dir)
+            _check_pause()
+            url_domain_intel = extract_domains_and_urls(app_dir, project_dir, "ios")
+            _check_pause()
+            email_intel = extract_emails(app_dir, project_dir, "ios")
+            _check_pause()
+            compute_file_hashes(Path(app_path), project_dir)
+        elif not run_static:
+            log("[main] Static analysis skipped (mode=dynamic)")
     elif platform == "android":
         app_dir = extract_apk(Path(app_path), extract_dir)
         if not app_dir:
             return 1
-        _check_pause()
-        manifest_data = analyse_manifest(app_dir, project_dir)
-        _check_pause()
-        analyse_permissions(app_dir, project_dir, manifest_data)
-        _check_pause()
-        analyse_strings_apk(app_dir, project_dir)
-        _check_pause()
-        analyse_network_security_config(app_dir, project_dir)
-        _check_pause()
-        analyse_android_code(app_dir, project_dir)
-        _check_pause()
-        analyse_runtime_protections(app_dir, project_dir)
-        _check_pause()
-        detect_trackers(app_dir, project_dir)
-        _check_pause()
-        analyse_apkid(app_dir, project_dir)
-        _check_pause()
-        detect_firebase(app_dir, project_dir)
-        _check_pause()
-        analyse_signing(Path(app_path), app_dir, project_dir)
-        _check_pause()
-        analyse_browsable_activities(app_dir, project_dir, manifest_data)
-        _check_pause()
-        analyse_behaviour_patterns(app_dir, project_dir, manifest_data)
-        _check_pause()
-        url_domain_intel = extract_domains_and_urls(app_dir, project_dir, "android")
-        _check_pause()
-        email_intel = extract_emails(app_dir, project_dir, "android")
-        _check_pause()
-        compute_file_hashes(Path(app_path), project_dir)
+        if run_static:
+            _check_pause()
+            manifest_data = analyse_manifest(app_dir, project_dir)
+            _check_pause()
+            analyse_permissions(app_dir, project_dir, manifest_data)
+            _check_pause()
+            analyse_strings_apk(app_dir, project_dir)
+            _check_pause()
+            analyse_network_security_config(app_dir, project_dir)
+            _check_pause()
+            analyse_android_code(app_dir, project_dir)
+            _check_pause()
+            analyse_runtime_protections(app_dir, project_dir)
+            _check_pause()
+            detect_trackers(app_dir, project_dir)
+            _check_pause()
+            analyse_apkid(app_dir, project_dir)
+            _check_pause()
+            detect_firebase(app_dir, project_dir)
+            _check_pause()
+            analyse_signing(Path(app_path), app_dir, project_dir)
+            _check_pause()
+            analyse_browsable_activities(app_dir, project_dir, manifest_data)
+            _check_pause()
+            analyse_behaviour_patterns(app_dir, project_dir, manifest_data)
+            _check_pause()
+            url_domain_intel = extract_domains_and_urls(app_dir, project_dir, "android")
+            _check_pause()
+            email_intel = extract_emails(app_dir, project_dir, "android")
+            _check_pause()
+            compute_file_hashes(Path(app_path), project_dir)
+        elif not run_static:
+            log("[main] Static analysis skipped (mode=dynamic)")
 
     _check_pause()
-    if args.dynamic:
+    if run_dynamic:
         log("[main] Dynamic analysis requested — resolving target process...")
         target_process = args.target_process
         if not target_process:
@@ -4634,7 +4663,7 @@ def main() -> int:
         dynamic_analysis(target_process, platform, args.device, project_dir)
 
     _check_pause()
-    if args.mitm:
+    if run_mitm:
         log("[main] MITM traffic analysis requested — resolving target process...")
         mitm_target = args.target_process
         if not mitm_target:
