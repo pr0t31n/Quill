@@ -1543,7 +1543,20 @@ def analyse_network_security_config(app_dir: Path, output_dir: Path) -> None:
             nsc_path = nsc_files[0]
 
     if nsc_path is None:
-        log("[nsc] No network_security_config.xml found in APK — skipping")
+        log("[nsc] No network_security_config.xml found — no NSC-level certificate pinning")
+        finding(title="Certificate pinning not configured in network security config",
+                severity="MEDIUM",
+                description=("No network_security_config.xml was found in the APK. Without a "
+                             "network security configuration, the application has no certificate "
+                             "pinning via the Android NSC mechanism, relying solely on the device "
+                             "trust store for TLS validation."),
+                data={"catalogue_id": "QUILL-APK-146",
+                      "affected": "network_security_config.xml (absent)",
+                      "remediation": "Add a network_security_config.xml with <pin-set> elements "
+                                     "for critical domains. Reference it in AndroidManifest.xml via "
+                                     "android:networkSecurityConfig."},
+                output="network_security_config.xml: NOT FOUND in APK\n"
+                       "Certificate pinning via Android Network Security Configuration is not configured.")
         status("nsc", "Network security config analysis", "skipped")
         return
 
@@ -1630,6 +1643,32 @@ def analyse_network_security_config(app_dir: Path, output_dir: Path) -> None:
                           "remediation": "Migrate listed domains to HTTPS and remove cleartextTrafficPermitted."},
                     output=f"network_security_config.xml:\n{dc_ct_xml}",
                     output_file=str(out_file))
+
+    pin_sets = tree.findall(".//pin-set") if tree is not None else []
+    if not pin_sets:
+        log("[nsc] No <pin-set> elements found — certificate pinning not configured via NSC")
+        result["findings"].append("no_pin_set")
+        finding(title="Certificate pinning not configured in network security config",
+                severity="MEDIUM",
+                description=("The network_security_config.xml does not contain any <pin-set> "
+                             "elements. Without certificate pinning, the application relies solely "
+                             "on the device trust store for TLS validation, allowing man-in-the-middle "
+                             "attacks by anyone who can install a trusted CA certificate on the device."),
+                data={"catalogue_id": "QUILL-APK-146",
+                      "affected": str(nsc_path),
+                      "remediation": "Add <pin-set> with backup pins for critical domains. "
+                                     "Use the SubjectPublicKeyInfo digest of the leaf or intermediate CA."},
+                output=f"network_security_config.xml present but contains no <pin-set> elements.\n"
+                       f"Parsed from: {nsc_path}",
+                output_file=str(out_file))
+    else:
+        pin_domains = []
+        for ps in pin_sets:
+            parent = ps.find("..")
+            if parent is not None:
+                for d in parent.findall(".//domain"):
+                    pin_domains.append(d.text or "(unnamed)")
+        log(f"[nsc] Certificate pinning configured for {len(pin_domains)} domain(s)")
 
     out_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
     _analysis_log(out_file, "Network security config deep parse",
@@ -1777,6 +1816,13 @@ _DEX_SAST_PATTERNS = [
      "The application executes raw SQL queries which may be vulnerable "
      "to SQL injection if user input is concatenated into the query string.",
      "Use parameterised queries (query() with selectionArgs, or Room DAO)."),
+    (re.compile(r"(?:OkHttpClientProvider\.setOkHttpClientFactory|\.cache\s*\(\s*new\s+Cache|CacheControl\.FORCE_CACHE)"),
+     "HTTP response caching configured", "LOW", "QUILL-APK-147",
+     "The application configures HTTP response caching (OkHttp Cache or "
+     "CacheControl). Cached responses may contain sensitive data (PII, ePHI, "
+     "tokens) that persists on the device filesystem.",
+     "Disable caching for responses containing sensitive data via Cache-Control: "
+     "no-store, or encrypt the cache directory."),
 ]
 
 _LOG_CALL_RX = re.compile(r"\bLog\.[dviwe]\s*\(")
@@ -1908,6 +1954,101 @@ def analyse_android_code(app_dir: Path, output_dir: Path) -> None:
     log(f"[sast] Android SAST code analysis complete — {finding_count} pattern(s) matched, "
         f"{log_call_count} log call(s)")
     status("sast", "Android code analysis", "complete")
+
+
+# ── Runtime protection detection (root/jailbreak, tamper, debugger) ──────────
+
+_ROOT_DETECT_INDICATORS = [
+    ("com/scottyab/rootbeer", "RootBeer"),
+    ("com/google/android/gms/safetynet", "SafetyNet Attestation"),
+    ("com/google/android/play/core/integrity", "Play Integrity API"),
+    ("com/scottyab/safetynet", "SafetyNet Helper"),
+    ("org/lsposed/lsposed", "LSPosed detection"),
+    ("com/noshufou/android/su", "SuperUser detection"),
+    ("eu/chainfire/libsuperuser", "libSuperUser"),
+    ("com/topjohnwu/superuser", "Magisk/libsu"),
+]
+
+_ROOT_DETECT_CODE_PATTERNS = [
+    re.compile(r"RootBeer|isRooted|isRootedWithBusyBox"),
+    re.compile(r"SafetyNetClient|SafetyNetApi|safetynet\.SafeBrowsing"),
+    re.compile(r"IntegrityManager|requestIntegrityToken"),
+    re.compile(r"/system/app/Superuser\.apk|/system/xbin/su\b|/sbin/su\b"),
+    re.compile(r"com\.noshufou\.android\.su|eu\.chainfire\.\w*su|com\.topjohnwu"),
+    re.compile(r"test-keys|ro\.debuggable"),
+]
+
+
+def analyse_runtime_protections(app_dir: Path, output_dir: Path) -> None:
+    _check_pause()
+    _save_checkpoint()
+    log("[rprot] Checking for runtime protection mechanisms (root detection, tamper, debug)...")
+    status("rprot", "Runtime protection analysis", "running")
+
+    found_indicators: list = []
+
+    smali_root = app_dir / "smali"
+    smali_dirs = list(app_dir.glob("smali*")) if smali_root.exists() else []
+
+    for pkg_path, lib_name in _ROOT_DETECT_INDICATORS:
+        for sd in smali_dirs:
+            if (sd / pkg_path).exists():
+                found_indicators.append(lib_name)
+                break
+
+    all_text = ""
+    for ext in ("smali", "java", "kt"):
+        for f in app_dir.rglob(f"*.{ext}"):
+            try:
+                all_text += f.read_text(encoding="utf-8", errors="ignore")[:200000]
+            except Exception:
+                continue
+            if len(all_text) > 5_000_000:
+                break
+
+    if not all_text:
+        strings_bin = shutil.which("strings")
+        if strings_bin:
+            for dex in app_dir.rglob("*.dex"):
+                cp = _run_tool_cmd([strings_bin, str(dex)],
+                                   output_file=str(output_dir / f"rprot_strings_{dex.name}.txt"),
+                                   timeout=120, tool_name="strings")
+                if cp is not None:
+                    all_text += (cp.stdout or "")
+
+    for pat in _ROOT_DETECT_CODE_PATTERNS:
+        m = pat.search(all_text)
+        if m:
+            match_text = m.group()[:80]
+            if match_text not in [i for i in found_indicators]:
+                found_indicators.append(f"code pattern: {match_text}")
+
+    if not found_indicators:
+        log("[rprot] No root/jailbreak detection mechanisms found — finding emitted")
+        finding(title="No root/jailbreak detection implemented",
+                severity="MEDIUM",
+                description=("The application does not implement root or jailbreak detection. "
+                             "No evidence of RootBeer, SafetyNet Attestation, Play Integrity API, "
+                             "su-binary checks, or other root detection libraries was found in "
+                             "the application code. Applications without root detection can be "
+                             "more easily analysed and attacked on rooted/jailbroken devices."),
+                data={"catalogue_id": "QUILL-APK-148",
+                      "affected": "Application binary",
+                      "remediation": "Implement root/jailbreak detection using a library such as "
+                                     "RootBeer or Google Play Integrity API. The application can "
+                                     "warn users, restrict functionality, or refuse to run on "
+                                     "compromised devices depending on risk tolerance."},
+                output="Root detection indicators searched:\n"
+                       "  Smali packages: " + ", ".join(p for p, _ in _ROOT_DETECT_INDICATORS) + "\n"
+                       "  Code patterns: RootBeer, SafetyNet, Play Integrity, su binary paths, "
+                       "test-keys, ro.debuggable\n"
+                       "Result: NONE FOUND")
+    else:
+        indicators_str = ", ".join(found_indicators)
+        log(f"[rprot] Root detection mechanisms found: {indicators_str}")
+
+    log("[rprot] Runtime protection analysis complete")
+    status("rprot", "Runtime protection analysis", "complete")
 
 
 # ── Tracker SDK detection ────────────────────────────────────────────────────
@@ -2604,6 +2745,26 @@ def analyse_signing(apk_path: Path, app_dir: Path, output_dir: Path) -> None:
                       "affected": str(apk_path),
                       "cves": "CVE-2017-13156",
                       "remediation": "Sign with v2 (or v3) APK Signature Scheme in addition to v1."},
+                output_file=str(out_file))
+    elif result["v1"] and (result["v2"] or result["v3"]):
+        schemes = "v1"
+        if result["v2"]: schemes += "+v2"
+        if result["v3"]: schemes += "+v3"
+        log(f"[signing] {schemes} signing — v1 still present, Janus risk on Android 5.0-7.0")
+        finding(title=f"APK includes v1 (JAR) signature scheme ({schemes})",
+                severity="MEDIUM",
+                description=(f"The APK is signed with {schemes}. While v2/v3 signatures "
+                             "protect against modification on modern devices, the presence "
+                             "of v1 (JAR) signing makes the APK vulnerable to the Janus "
+                             "attack (CVE-2017-13156) on devices running Android 5.0-7.0 "
+                             "that only verify v1 signatures."),
+                data={"catalogue_id": "QUILL-APK-145",
+                      "affected": str(apk_path),
+                      "cves": "CVE-2017-13156",
+                      "remediation": "Remove v1 signing and use v2/v3 only, or raise minSdkVersion "
+                                     "to API 24+ where v2 verification is enforced."},
+                output=f"Signing schemes detected: {schemes}\nv1 (JAR): {result['v1']}\n"
+                       f"v2 (APK Signature Scheme): {result['v2']}\nv3 (rotation): {result['v3']}",
                 output_file=str(out_file))
 
     weak_algos = []
@@ -4277,6 +4438,8 @@ def main() -> int:
         analyse_network_security_config(app_dir, project_dir)
         _check_pause()
         analyse_android_code(app_dir, project_dir)
+        _check_pause()
+        analyse_runtime_protections(app_dir, project_dir)
         _check_pause()
         detect_trackers(app_dir, project_dir)
         _check_pause()
