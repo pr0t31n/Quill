@@ -3718,6 +3718,18 @@ def mitm_capture(target_process: str, platform: str, device: str,
     mitm_dir.mkdir(parents=True, exist_ok=True)
     (mitm_dir / "evidence").mkdir(parents=True, exist_ok=True)
     flows_file = mitm_dir / "traffic_capture.mitm"
+
+    # Copy mitmproxy CA cert into project output for downstream import (Burp, etc.)
+    _mitm_ca = Path.home() / ".mitmproxy" / "mitmproxy-ca-cert.pem"
+    if _mitm_ca.exists():
+        _ca_dst = mitm_dir / "mitmproxy-ca-cert.pem"
+        shutil.copy2(str(_mitm_ca), str(_ca_dst))
+        log(f"[mitm] CA cert copied to {_ca_dst}")
+        status("mitm_ca_cert", str(_ca_dst), "info")
+    else:
+        log("[mitm] mitmproxy CA cert not found at ~/.mitmproxy/mitmproxy-ca-cert.pem "
+            "— run mitmdump once to auto-generate it")
+
     ssl_script_file = None
     if frida_bin:
         ssl_script = _FRIDA_SSL_PINNING_SCRIPT if platform == "android" else _FRIDA_IOS_SSL_SCRIPT
