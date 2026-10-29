@@ -4489,15 +4489,22 @@ def main() -> int:
         return 0
 
     app_path = args.app or args.ipa
-    if not app_path:
-        p.error("--app (or --ipa) is required")
+    _dynamic_only = args.mode == "dynamic" or (args.dynamic and args.mode != "full")
+    _mitm_only = args.mitm and not _dynamic_only and args.mode != "full"
+    if not app_path and not _dynamic_only and not _mitm_only:
+        p.error("--app (or --ipa) is required unless --mode dynamic or --mitm")
+    if not app_path and _dynamic_only and not args.target_process:
+        p.error("--target-process is required when running dynamic-only without --app")
 
     platform = args.platform
     if platform == "auto":
-        platform = _detect_platform(app_path)
-        if not platform:
-            p.error(f"Cannot detect platform from extension: {app_path} — use --platform ios|android")
-        log(f"[init] Auto-detected platform: {platform} (from file extension)")
+        if app_path:
+            platform = _detect_platform(app_path)
+            if not platform:
+                p.error(f"Cannot detect platform from extension: {app_path} — use --platform ios|android")
+            log(f"[init] Auto-detected platform: {platform} (from file extension)")
+        else:
+            p.error("--platform ios|android is required when no app binary is provided")
     else:
         log(f"[init] Platform specified: {platform}")
 
@@ -4537,7 +4544,7 @@ def main() -> int:
             client_short=args.client_short,
             client_name=(args.client_name or args.client_short),
             engagement_name=args.engagement_name,
-            target=app_path))
+            target=app_path or args.target_process or "dynamic"))
         log("[init] meta.json written (universal schema)")
         try:
             import pr0t31n_dep_snapshot as _ds
@@ -4560,8 +4567,9 @@ def main() -> int:
     run_mitm = args.mitm
 
     global _APP_TARGET, _EXTRACT_BASE
-    _APP_TARGET = Path(app_path).name
-    log(f"[init] Quill v{VERSION} starting — {platform.upper()}: {app_path}")
+    _APP_TARGET = Path(app_path).name if app_path else (args.target_process or "dynamic")
+    _mode_label = "MITM-only" if (run_mitm and not run_dynamic and not app_path) else "dynamic/MITM only" if not app_path else app_path
+    log(f"[init] Quill v{VERSION} starting — {platform.upper()}: {_mode_label}")
     log(f"[init] Mode: {mode} (static={run_static}, dynamic={run_dynamic}, mitm={run_mitm})")
     log(f"[init] Client: {args.client_short}, Engagement: {args.engagement_name}")
     started_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -4572,7 +4580,9 @@ def main() -> int:
     app_dir = None
     manifest_data = {}
     plist_data = {}
-    if platform == "ios":
+    if not app_path:
+        log("[main] No app binary — skipping extraction and static analysis (dynamic/MITM only)")
+    elif platform == "ios":
         app_dir = extract_ipa(Path(app_path), extract_dir)
         if not app_dir:
             return 1
@@ -4657,8 +4667,11 @@ def main() -> int:
                         target_process = tree.getroot().get("package", "")
                     except Exception:
                         pass
-            if not target_process:
+            if not target_process and app_path:
                 target_process = Path(app_path).stem
+            if not target_process:
+                err("[main] Cannot resolve dynamic target — no --target-process and no app binary")
+                return 1
             log(f"[main] Dynamic target process resolved: {target_process}")
         dynamic_analysis(target_process, platform, args.device, project_dir)
 
@@ -4677,8 +4690,11 @@ def main() -> int:
                         mitm_target = tree.getroot().get("package", "")
                     except Exception:
                         pass
-            if not mitm_target:
+            if not mitm_target and app_path:
                 mitm_target = Path(app_path).stem
+            if not mitm_target:
+                mitm_target = "unknown"
+                log("[main] MITM target process unknown — capturing all traffic on proxy port")
             log(f"[main] MITM target process: {mitm_target}")
         flows_file = mitm_capture(
             mitm_target, platform, args.device, project_dir,
@@ -4699,7 +4715,7 @@ def main() -> int:
             summary = _us.make_summary(
                 tool="quill", version=VERSION,
                 scan_start=started_at, scan_end=ended_at,
-                target=app_path,
+                target=app_path or args.target_process or "dynamic",
                 success=True, total_findings=len(out),
                 risk_counts=_risk_counts(out))
             _us.write_summary(project_dir, summary)
