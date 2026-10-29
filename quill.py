@@ -3676,12 +3676,32 @@ def _write_mitm_evidence(flow, evidence_dir: Path, seq: int):
     return _rel(str(req_file)), _rel(str(resp_file)), _rel(str(log_file))
 
 
+_MITM_MEM_THRESHOLD_MB = 512
+
+def _get_rss_mb(pid: int) -> float:
+    try:
+        with open(f"/proc/{pid}/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) / 1024.0
+    except FileNotFoundError:
+        pass
+    try:
+        import resource
+        r = subprocess.run(["ps", "-o", "rss=", "-p", str(pid)],
+                           capture_output=True, text=True, timeout=5)
+        if r.returncode == 0 and r.stdout.strip():
+            return int(r.stdout.strip()) / 1024.0
+    except Exception:
+        pass
+    return 0.0
+
 def mitm_capture(target_process: str, platform: str, device: str,
-                 output_dir: Path, *, duration: int = 120, port: int = 8080,
-                 transparent: bool = False) -> Optional[Path]:
+                 output_dir: Path, *, port: int = 8080,
+                 transparent: bool = False, **_kw) -> Optional[Path]:
     _check_pause()
     _save_checkpoint()
-    log(f"[mitm] Starting MITM traffic capture — duration={duration}s, port={port}, "
+    log(f"[mitm] Starting MITM traffic capture — port={port}, "
         f"transparent={transparent}")
     status("mitm_capture", "MITM traffic capture", "running")
     mitmdump_bin = shutil.which("mitmdump")
@@ -3760,32 +3780,56 @@ def mitm_capture(target_process: str, platform: str, device: str,
         print("__CRUCIBLE_STATUS__:" + _json_mod.dumps({
             "phase": "mitm_capture", "label": "MITM capture active",
             "state": "running", "mitm_active": True}), flush=True)
-    log(f"[mitm] Capturing traffic — exercise the app now (max {duration}s, "
-        f"stop via Crucible or touch {mitm_sentinel.name})")
+    log("[mitm] Capturing traffic — exercise the app now "
+        f"(stop via Crucible or touch {mitm_sentinel.name})")
     status("mitm_capture", "Capturing traffic — stop when ready", "running")
     elapsed = 0
-    stopped_by_user = False
-    while elapsed < duration:
+    stop_reason = None
+    while True:
         _check_pause()
         if mitm_sentinel.exists():
-            stopped_by_user = True
+            stop_reason = "user"
             log("[mitm] Stop signal received — ending capture")
             try:
                 mitm_sentinel.unlink()
             except OSError:
                 pass
             break
-        wait = min(5, duration - elapsed)
-        _time_mod.sleep(wait)
-        elapsed += wait
-        if elapsed % 30 == 0:
-            log(f"[mitm] Capture in progress — {elapsed}s elapsed")
-            status("mitm_capture", f"Capturing ({elapsed}s elapsed)", "running")
+        if mitm_proc.poll() is not None:
+            stop_reason = "process_exited"
+            log(f"[mitm] mitmproxy exited (code {mitm_proc.returncode})")
+            break
+        if elapsed > 0 and elapsed % 30 == 0:
+            rss = _get_rss_mb(mitm_proc.pid)
+            if rss >= _MITM_MEM_THRESHOLD_MB:
+                stop_reason = "memory"
+                log(f"[mitm] Memory threshold reached ({rss:.0f}MB >= "
+                    f"{_MITM_MEM_THRESHOLD_MB}MB) — pausing capture")
+                status("mitm_capture",
+                       f"Paused — memory threshold ({rss:.0f}MB)", "paused")
+                if _MANAGED:
+                    print("__CRUCIBLE_STATUS__:" + _json_mod.dumps({
+                        "phase": "mitm_capture",
+                        "label": f"MITM paused — memory ({rss:.0f}MB)",
+                        "state": "paused", "mitm_active": False,
+                        "mitm_paused": True}), flush=True)
+                break
+            log(f"[mitm] Capture in progress — {elapsed}s elapsed, "
+                f"mitmproxy RSS {rss:.0f}MB")
+            status("mitm_capture", f"Capturing ({elapsed}s)", "running")
+        _time_mod.sleep(5)
+        elapsed += 5
 
-    if stopped_by_user:
-        log(f"[mitm] User stopped capture after {elapsed}s — stopping proxy and Frida...")
+    if stop_reason == "memory":
+        log(f"[mitm] Capture paused after {elapsed}s due to memory — "
+            "resume via Crucible or restart Quill with --resume")
+    elif stop_reason == "user":
+        log(f"[mitm] User stopped capture after {elapsed}s")
+    elif stop_reason == "process_exited":
+        log(f"[mitm] Capture ended after {elapsed}s — mitmproxy exited")
     else:
-        log(f"[mitm] Max duration reached ({duration}s) — stopping proxy and Frida...")
+        log(f"[mitm] Capture ended after {elapsed}s")
+    log("[mitm] Stopping proxy and Frida...")
     import signal as _sig_mod
     try:
         mitm_proc.send_signal(_sig_mod.SIGINT)
@@ -4495,9 +4539,9 @@ def main() -> int:
                      help="Enable MITM traffic capture and analysis (works with any mode; "
                           "does NOT require Frida — chain Burp → Quill proxy → internet "
                           "for manual pinning bypass flows)")
-    p.add_argument("--mitm-duration", type=int, default=3600,
-                     help="Max MITM capture duration in seconds (default: 3600); "
-                          "capture stops earlier when user signals via Crucible or sentinel file")
+    p.add_argument("--mitm-duration", type=int, default=0,
+                     help="Deprecated — capture runs until stopped. "
+                          "Kept for backward compatibility; value is ignored")
     p.add_argument("--mitm-port", type=int, default=8080,
                      help="mitmproxy listen port (default: 8080)")
     p.add_argument("--mitm-transparent", action="store_true",
@@ -4720,7 +4764,7 @@ def main() -> int:
             log(f"[main] MITM target process: {mitm_target}")
         flows_file = mitm_capture(
             mitm_target, platform, args.device, project_dir,
-            duration=args.mitm_duration, port=args.mitm_port,
+            port=args.mitm_port,
             transparent=args.mitm_transparent)
         if flows_file:
             mitm_analyse(project_dir, flows_file)
