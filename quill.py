@@ -3724,81 +3724,33 @@ def _ensure_mitmproxy_ca(mitmdump_bin: str) -> Optional[Path]:
     return None
 
 
-def _try_import_burp_ca(ca_cert: Path) -> dict:
-    """Auto-detect local Burp and import mitmproxy CA into its Java truststore.
+def _setup_burp_ca_confdir(burp_ca_path: str, mitm_dir: Path) -> Optional[Path]:
+    """Create a mitmproxy confdir that uses an upstream proxy's CA for signing.
 
-    Returns dict with keys: success, message, manual_cmd (if auto failed).
+    The proxy's exported CA (cert+key PEM) is copied as mitmproxy-ca.pem so
+    mitmdump presents certs the device already trusts (via the proxy CA).
+    Returns the confdir path, or None if the CA file is invalid.
     """
-    import glob as _glob
-
-    if sys.platform == "darwin":
-        cacerts_pats = ["/Applications/Burp Suite*.app/Contents/Resources/jre.bundle/Contents/Home/lib/security/cacerts"]
-        keytool_pats = ["/Applications/Burp Suite*.app/Contents/Resources/jre.bundle/Contents/Home/bin/keytool"]
-    elif sys.platform.startswith("linux"):
-        cacerts_pats = [
-            "/opt/BurpSuite*/jre/lib/security/cacerts",
-            "/usr/local/BurpSuite*/jre/lib/security/cacerts",
-            str(Path.home() / "BurpSuite*/jre/lib/security/cacerts"),
-        ]
-        keytool_pats = [
-            "/opt/BurpSuite*/jre/bin/keytool",
-            "/usr/local/BurpSuite*/jre/bin/keytool",
-            str(Path.home() / "BurpSuite*/jre/bin/keytool"),
-        ]
-    else:
-        return {"success": False, "message": "Burp auto-import not supported on this platform",
-                "manual_cmd": None}
-
-    cacerts_files = []
-    for pat in cacerts_pats:
-        cacerts_files.extend(_glob.glob(pat))
-    keytool_files = []
-    for pat in keytool_pats:
-        keytool_files.extend(_glob.glob(pat))
-
-    if not cacerts_files or not keytool_files:
-        return {"success": False, "message": "Burp Suite not detected locally",
-                "manual_cmd": None}
-
-    keytool = keytool_files[0]
-    cacerts = cacerts_files[0]
-
-    try:
-        chk = subprocess.run(
-            [keytool, "-list", "-alias", "mitmproxy",
-             "-keystore", cacerts, "-storepass", "changeit"],
-            capture_output=True, text=True, timeout=10)
-        if chk.returncode == 0:
-            return {"success": True, "message": "mitmproxy CA already trusted by Burp",
-                    "manual_cmd": None}
-    except Exception:
-        pass
-
-    import_cmd = [keytool, "-import", "-alias", "mitmproxy",
-                  "-trustcacerts", "-noprompt",
-                  "-file", str(ca_cert),
-                  "-keystore", cacerts,
-                  "-storepass", "changeit"]
-    cmd_str = " ".join(f'"{c}"' if " " in c else c for c in import_cmd)
-
-    try:
-        result = subprocess.run(import_cmd, capture_output=True, text=True, timeout=15)
-        if result.returncode == 0:
-            return {"success": True,
-                    "message": "mitmproxy CA imported into Burp — restart Burp to apply",
-                    "manual_cmd": None}
-        return {"success": False,
-                "message": f"Auto-import failed — run manually with sudo",
-                "manual_cmd": f"sudo {cmd_str}"}
-    except Exception as exc:
-        return {"success": False, "message": str(exc),
-                "manual_cmd": f"sudo {cmd_str}"}
+    src = Path(burp_ca_path)
+    if not src.exists():
+        err(f"[mitm] Proxy CA file not found: {burp_ca_path}")
+        return None
+    pem = src.read_text(encoding="utf-8", errors="replace")
+    if "PRIVATE KEY" not in pem or "CERTIFICATE" not in pem:
+        err("[mitm] Proxy CA file must contain both certificate and private key in PEM format")
+        return None
+    confdir = mitm_dir / ".mitmproxy_burp"
+    confdir.mkdir(parents=True, exist_ok=True)
+    (confdir / "mitmproxy-ca.pem").write_text(pem, encoding="utf-8")
+    log(f"[mitm] Using upstream proxy CA for signing — device only needs one CA trusted")
+    return confdir
 
 
 def mitm_capture(target_process: str, platform: str, device: str,
                  output_dir: Path, *, port: int = 8080,
                  transparent: bool = False,
-                 upstream_proxy: str = "", **_kw) -> Optional[Path]:
+                 upstream_proxy: str = "",
+                 burp_ca: str = "", **_kw) -> Optional[Path]:
     _check_pause()
     _save_checkpoint()
     log(f"[mitm] Starting MITM traffic capture — port={port}, "
@@ -3819,33 +3771,26 @@ def mitm_capture(target_process: str, platform: str, device: str,
     (mitm_dir / "evidence").mkdir(parents=True, exist_ok=True)
     flows_file = mitm_dir / "traffic_capture.mitm"
 
-    # Ensure mitmproxy CA exists (auto-generate on first run)
+    # Set up signing CA — use upstream proxy's CA if provided, otherwise mitmproxy's own
+    _custom_confdir = None
+    if burp_ca:
+        _custom_confdir = _setup_burp_ca_confdir(burp_ca, mitm_dir)
     _mitm_ca = _ensure_mitmproxy_ca(mitmdump_bin)
     _ca_dst = mitm_dir / "mitmproxy-ca-cert.pem"
-    _burp_import = {"success": False, "message": "", "manual_cmd": None}
-    if _mitm_ca:
+    if _custom_confdir:
+        _proxy_cert = Path(burp_ca)
+        if _proxy_cert.exists():
+            pem = _proxy_cert.read_text(encoding="utf-8", errors="replace")
+            import re as _re_mod
+            cert_match = _re_mod.search(
+                r'(-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----)',
+                pem, _re_mod.DOTALL)
+            if cert_match:
+                _ca_dst.write_text(cert_match.group(1) + "\n", encoding="utf-8")
+                log(f"[mitm] Proxy CA cert (public) copied to {_ca_dst}")
+    elif _mitm_ca:
         shutil.copy2(str(_mitm_ca), str(_ca_dst))
-        log(f"[mitm] CA cert copied to {_ca_dst}")
-        # Auto-import into local Burp if detected
-        _burp_import = _try_import_burp_ca(_mitm_ca)
-        if _burp_import["success"]:
-            log(f"[mitm] Burp CA import: {_burp_import['message']}")
-        else:
-            log(f"[mitm] Burp CA import: {_burp_import['message']}")
-            if _burp_import.get("manual_cmd"):
-                log(f"[mitm] Manual import command: {_burp_import['manual_cmd']}")
-    else:
-        log("[mitm] Could not generate mitmproxy CA — MITM capture may still work "
-            "but upstream proxy chains will fail TLS negotiation")
-    # Emit status with CA + Burp import info for Crucible Intelligence tab
-    import json as _json_mod
-    _ca_status = {
-        "ca_cert_path": str(_ca_dst) if _ca_dst.exists() else None,
-        "burp_imported": _burp_import["success"],
-        "burp_message": _burp_import["message"],
-        "burp_manual_cmd": _burp_import.get("manual_cmd"),
-    }
-    status("mitm_ca_setup", _json_mod.dumps(_ca_status), "info")
+        log(f"[mitm] mitmproxy CA cert copied to {_ca_dst}")
 
     ssl_script_file = None
     if frida_bin:
@@ -3880,6 +3825,7 @@ def mitm_capture(target_process: str, platform: str, device: str,
     if upstream_proxy:
         mode = f"upstream:{upstream_proxy}"
         log(f"[mitm] Upstream proxy mode — forwarding through {upstream_proxy}")
+        log(f"[mitm] Chain: Device → mitmdump (:{port}) → upstream proxy ({upstream_proxy}) → Internet")
     elif transparent:
         mode = "transparent"
     else:
@@ -3888,6 +3834,8 @@ def mitm_capture(target_process: str, platform: str, device: str,
                 "-p", str(port), "--ssl-insecure",
                 "--set", "flow_detail=1",
                 "--set", "stream_large_bodies=5m"]
+    if _custom_confdir:
+        mitm_cmd.extend(["--set", f"confdir={_custom_confdir}"])
     log(f"[mitm] Launching mitmdump: {' '.join(mitm_cmd)}")
     mitm_started = datetime.now(timezone.utc)
     mitm_proc = subprocess.Popen(mitm_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -3921,7 +3869,7 @@ def mitm_capture(target_process: str, platform: str, device: str,
         except Exception as exc:
             log(f"[mitm] Frida launch failed (capture continues without SSL bypass): {exc}")
     else:
-        log("[mitm] Frida SSL bypass skipped — using external bypass (Burp / manual)")
+        log("[mitm] Frida SSL bypass skipped — using external bypass (upstream proxy / manual)")
 
     import time as _time_mod
     mitm_sentinel = output_dir / "_mitm_stop"
@@ -4687,8 +4635,8 @@ def main() -> int:
     p.add_argument("--engagement-name", default="quill run", help="Engagement name for meta.json")
     p.add_argument("--mitm", action="store_true",
                      help="Enable MITM traffic capture and analysis (works with any mode; "
-                          "does NOT require Frida — chain Burp → Quill proxy → internet "
-                          "for manual pinning bypass flows)")
+                          "does NOT require Frida — use --mitm-upstream-proxy to chain "
+                          "through an external proxy for manual pinning bypass flows)")
     p.add_argument("--mitm-duration", type=int, default=0,
                      help="Deprecated — capture runs until stopped. "
                           "Kept for backward compatibility; value is ignored")
@@ -4696,6 +4644,13 @@ def main() -> int:
                      help="mitmproxy listen port (default: 8080)")
     p.add_argument("--mitm-transparent", action="store_true",
                      help="Use transparent proxy mode (requires iptables/pf)")
+    p.add_argument("--mitm-upstream-proxy", default="",
+                     help="Upstream proxy URL (e.g. http://127.0.0.1:8080) — "
+                          "chain: Device → Quill MITM → Proxy → Internet")
+    p.add_argument("--mitm-burp-ca", default="",
+                     help="Path to upstream proxy's CA (cert+key PEM) — "
+                          "Quill signs with this CA so the device only "
+                          "needs one CA trusted, not two")
     p.add_argument("--project", help="Override project output directory")
     p.add_argument("--version", action="store_true")
     args = p.parse_args()
@@ -4920,7 +4875,9 @@ def main() -> int:
         flows_file = mitm_capture(
             mitm_target, platform, args.device, project_dir,
             port=args.mitm_port,
-            transparent=args.mitm_transparent)
+            transparent=args.mitm_transparent,
+            upstream_proxy=args.mitm_upstream_proxy,
+            burp_ca=args.mitm_burp_ca)
         if flows_file:
             mitm_analyse(project_dir, flows_file)
 
