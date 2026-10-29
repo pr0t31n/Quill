@@ -341,6 +341,30 @@ def analyse_info_plist(app_dir: Path, output_dir: Path) -> dict:
                      output=f"Info.plist CFBundleURLSchemes: \"{sch}\"",
                      output_file=str(out_file))
 
+    pinned_domains = ats.get("NSPinnedDomains") or {}
+    if pinned_domains:
+        pin_list = ", ".join(sorted(pinned_domains.keys())[:10])
+        log(f"[info_plist] ATS: Certificate pinning configured for {len(pinned_domains)} domain(s): {pin_list}")
+    else:
+        log("[info_plist] ATS: No NSPinnedDomains — no ATS-level certificate pinning configured")
+        finding(title="Certificate pinning not configured in App Transport Security",
+                severity="MEDIUM",
+                description=("The Info.plist NSAppTransportSecurity dictionary does not contain "
+                             "NSPinnedDomains. Without certificate pinning, the application "
+                             "relies solely on the device trust store for TLS validation, "
+                             "allowing man-in-the-middle attacks by anyone who can install a "
+                             "trusted CA certificate on the device (iOS 14+ supports native "
+                             "ATS pinning via NSPinnedDomains)."),
+                data={"catalogue_id": "QUILL-IOS-030",
+                      "affected": bundle_id,
+                      "remediation": "Add NSPinnedDomains to NSAppTransportSecurity in Info.plist "
+                                     "with SPKI digests for critical API domains, or implement "
+                                     "pinning in code using URLSessionDelegate or TrustKit."},
+                output=f"Info.plist NSAppTransportSecurity:\n"
+                       f"  NSPinnedDomains: NOT PRESENT\n"
+                       f"  ATS config keys: {', '.join(ats.keys()) if ats else '(empty/absent)'}",
+                output_file=str(out_file))
+
     bg_modes = data.get("UIBackgroundModes") or []
     if bg_modes:
         log(f"[info_plist] Background modes: {', '.join(bg_modes)}")
@@ -1518,6 +1542,133 @@ def analyse_ios_permissions(app_dir: Path, output_dir: Path, plist_data: dict) -
 
     log("[ios_perms] iOS permission enumeration complete")
     status("ios_perms", "iOS permission enumeration", "complete")
+
+
+# ── iOS runtime protections (jailbreak detection + code-level pinning) ───────
+
+_IOS_JB_DETECT_PATTERNS = [
+    re.compile(rb"(?:IOSSecuritySuite|isJailbroken|amIJailbroken)"),
+    re.compile(rb"(?:/Applications/Cydia\.app|/Library/MobileSubstrate|/usr/sbin/sshd)"),
+    re.compile(rb"(?:/bin/bash|/usr/bin/ssh|/etc/apt|/private/var/lib/apt)"),
+    re.compile(rb"DTTJailbreakDetection|JailBreakDetection|JailbreakChecker"),
+    re.compile(rb"canOpenURL.*?cydia://"),
+]
+
+_IOS_PINNING_PATTERNS = [
+    re.compile(rb"TrustKit|trustkit"),
+    re.compile(rb"AFSecurityPolicy|evaluateServerTrust"),
+    re.compile(rb"SecTrustSetAnchorCertificates"),
+    re.compile(rb"CertificatePinner|SSLPinning"),
+    re.compile(rb"URLSessionPinningDelegate|didReceiveChallenge.*?serverTrust"),
+    re.compile(rb"Alamofire.*?ServerTrustManager"),
+]
+
+
+def analyse_ios_runtime_protections(app_dir: Path, output_dir: Path) -> None:
+    _check_pause()
+    _save_checkpoint()
+    log("[ios_rprot] Checking iOS runtime protections (jailbreak detection, code-level pinning)...")
+    status("ios_rprot", "iOS runtime protection analysis", "running")
+
+    binary_data = b""
+    app_binary = None
+    for f in app_dir.iterdir():
+        if f.is_file() and not f.suffix and f.stat().st_size > 10000:
+            app_binary = f
+            break
+    if app_binary is None:
+        for f in app_dir.rglob("*"):
+            if f.is_file() and f.suffix == "" and f.stat().st_size > 50000:
+                app_binary = f
+                break
+
+    if app_binary:
+        try:
+            binary_data = app_binary.read_bytes()[:20_000_000]
+        except Exception:
+            pass
+
+    for fw_dir in app_dir.rglob("*.framework"):
+        for f in fw_dir.iterdir():
+            if f.is_file() and not f.suffix and f.stat().st_size > 5000:
+                try:
+                    binary_data += f.read_bytes()[:5_000_000]
+                except Exception:
+                    pass
+        if len(binary_data) > 30_000_000:
+            break
+
+    strings_text = b""
+    strings_bin = shutil.which("strings")
+    if strings_bin and app_binary:
+        cp = _run_tool_cmd([strings_bin, "-n", "8", str(app_binary)],
+                           output_file=str(output_dir / "ios_rprot_strings.txt"),
+                           timeout=120, tool_name="strings")
+        if cp is not None and cp.stdout:
+            strings_text = cp.stdout.encode("utf-8", errors="ignore")
+
+    search_data = binary_data + strings_text
+
+    jb_found: list = []
+    for pat in _IOS_JB_DETECT_PATTERNS:
+        m = pat.search(search_data)
+        if m:
+            jb_found.append(m.group().decode("utf-8", errors="replace")[:80])
+
+    if not jb_found:
+        log("[ios_rprot] No jailbreak detection mechanisms found — finding emitted")
+        finding(title="No jailbreak detection implemented",
+                severity="MEDIUM",
+                description=("The iOS application does not implement jailbreak detection. "
+                             "No evidence of IOSSecuritySuite, Cydia path checks, "
+                             "DTTJailbreakDetection, or other jailbreak detection patterns "
+                             "was found in the application binary. Applications without "
+                             "jailbreak detection can be more easily analysed and attacked "
+                             "on jailbroken devices."),
+                data={"catalogue_id": "QUILL-IOS-031",
+                      "affected": "Application binary",
+                      "remediation": "Implement jailbreak detection using IOSSecuritySuite "
+                                     "or equivalent. The application can warn users, restrict "
+                                     "functionality, or refuse to run on compromised devices."},
+                output="Jailbreak detection indicators searched:\n"
+                       "  IOSSecuritySuite, isJailbroken, Cydia.app, MobileSubstrate,\n"
+                       "  DTTJailbreakDetection, /bin/bash, /usr/bin/ssh, canOpenURL cydia://\n"
+                       "Result: NONE FOUND")
+    else:
+        jb_str = ", ".join(jb_found[:5])
+        log(f"[ios_rprot] Jailbreak detection found: {jb_str}")
+
+    pin_found: list = []
+    for pat in _IOS_PINNING_PATTERNS:
+        m = pat.search(search_data)
+        if m:
+            pin_found.append(m.group().decode("utf-8", errors="replace")[:80])
+
+    if not pin_found:
+        log("[ios_rprot] No code-level certificate pinning found — finding emitted")
+        finding(title="No code-level certificate pinning detected in binary",
+                severity="MEDIUM",
+                description=("The iOS application binary does not contain evidence of "
+                             "code-level certificate pinning. No references to TrustKit, "
+                             "AFSecurityPolicy, SecTrustSetAnchorCertificates, "
+                             "URLSessionPinningDelegate, or Alamofire ServerTrustManager "
+                             "were found. Combined with no NSPinnedDomains in Info.plist, "
+                             "the application relies entirely on the device trust store."),
+                data={"catalogue_id": "QUILL-IOS-032",
+                      "affected": "Application binary",
+                      "remediation": "Implement certificate pinning using TrustKit, "
+                                     "URLSession delegate challenges with SecTrust, "
+                                     "or NSPinnedDomains in Info.plist (iOS 14+)."},
+                output="Certificate pinning indicators searched in binary:\n"
+                       "  TrustKit, AFSecurityPolicy, SecTrustSetAnchorCertificates,\n"
+                       "  CertificatePinner, URLSessionPinningDelegate, Alamofire ServerTrustManager\n"
+                       "Result: NONE FOUND")
+    else:
+        pin_str = ", ".join(pin_found[:5])
+        log(f"[ios_rprot] Code-level pinning found: {pin_str}")
+
+    log("[ios_rprot] iOS runtime protection analysis complete")
+    status("ios_rprot", "iOS runtime protection analysis", "complete")
 
 
 # ── Android network security config deep parse ──
@@ -4416,6 +4567,8 @@ def main() -> int:
         analyse_ios_frameworks(app_dir, project_dir)
         _check_pause()
         analyse_ios_permissions(app_dir, project_dir, plist_data)
+        _check_pause()
+        analyse_ios_runtime_protections(app_dir, project_dir)
         _check_pause()
         detect_trackers_ios(app_dir, project_dir)
         _check_pause()
