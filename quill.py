@@ -54,6 +54,11 @@ try:
 except ImportError:
     _PP = None
 
+try:
+    from androguard.core.axml import AXMLPrinter as _AXMLPrinter
+except ImportError:
+    _AXMLPrinter = None
+
 _MANAGED = os.environ.get("CRUCIBLE_MANAGED", "") == "1"
 _findings: list = []
 
@@ -482,6 +487,42 @@ def analyse_strings(app_dir: Path, output_dir: Path) -> None:
 
 # ── APK extraction ────────────────────────────────────────────────────────────
 
+
+def _decode_binary_xml_inplace(extract_dir: Path) -> bool:
+    if _AXMLPrinter is None:
+        log("[extract] androguard not installed — cannot decode binary XML in-place")
+        return False
+    targets = []
+    manifest = extract_dir / "AndroidManifest.xml"
+    if manifest.exists():
+        targets.append(manifest)
+    res_xml = extract_dir / "res" / "xml"
+    if res_xml.is_dir():
+        targets.extend(f for f in res_xml.iterdir() if f.suffix == ".xml")
+    decoded = 0
+    for xml_path in targets:
+        try:
+            ET.parse(xml_path)
+            continue
+        except ET.ParseError:
+            pass
+        try:
+            raw = xml_path.read_bytes()
+            ap = _AXMLPrinter(raw)
+            text = ap.get_xml()
+            if isinstance(text, bytes):
+                text = text.decode("utf-8", errors="replace")
+            xml_path.write_text(text, encoding="utf-8")
+            decoded += 1
+            log(f"[extract] Decoded binary XML: {xml_path.name}")
+        except Exception as exc:
+            err(f"[extract] Failed to decode {xml_path.name}: {exc}")
+    if decoded:
+        log(f"[extract] Decoded {decoded} binary XML file(s) via androguard")
+        return True
+    return False
+
+
 def extract_apk(apk_path: Path, dest: Path) -> Optional[Path]:
     _check_pause()
     log(f"[extract] Extracting APK archive: {apk_path}")
@@ -503,34 +544,48 @@ def extract_apk(apk_path: Path, dest: Path) -> Optional[Path]:
         status("extract", "APK extraction", "error")
         return None
 
-    if not (dest / "AndroidManifest.xml").exists() and not (dest / "classes.dex").exists():
-        log("[extract] Standard manifest/dex not found — binary XML suspected")
-        apktool = shutil.which("apktool")
-        if apktool:
-            log(f"[extract] Binary XML detected — running apktool decode ({apktool})")
-            _save_checkpoint()
-            try:
-                decoded = dest / "decoded"
-                if _ur is not None:
-                    _ur.run_tool([apktool, "d", "-f", "-o", str(decoded), str(apk_path)],
-                                  output_file=str(decoded / "apktool.yml"),
-                                  timeout=300, tool_name="apktool",
-                                  errors_log=(str(_RUN_DIR / "errors.log")
-                                              if _RUN_DIR is not None else None))
-                else:
-                    subprocess.run([apktool, "d", "-f", "-o", str(decoded), str(apk_path)],
-                                    capture_output=True, text=True, timeout=300)
-                _check_pause()
-                if (decoded / "AndroidManifest.xml").exists():
-                    log(f"[extract] apktool decode successful — decoded manifest at {decoded}")
-                    status("extract", "APK extraction", "complete")
-                    return decoded
-            except Exception as exc:
-                err(f"apktool error: {exc}")
+    _needs_decode = False
+    _manifest = dest / "AndroidManifest.xml"
+    if _manifest.exists():
+        try:
+            ET.parse(_manifest)
+        except ET.ParseError:
+            _needs_decode = True
+            log("[extract] Binary XML manifest detected — decoding needed")
+    elif not (dest / "classes.dex").exists():
+        _needs_decode = True
+        log("[extract] Standard manifest/dex not found — unusual archive")
+
+    if _needs_decode:
+        if _decode_binary_xml_inplace(dest):
+            log("[extract] In-place binary XML decode successful")
         else:
-            log("[extract] apktool not available — raw ZIP extraction only (binary XML not decoded)")
+            apktool = shutil.which("apktool")
+            if apktool:
+                log(f"[extract] Falling back to apktool decode ({apktool})")
+                _save_checkpoint()
+                try:
+                    decoded = dest / "decoded"
+                    if _ur is not None:
+                        _ur.run_tool([apktool, "d", "-f", "-o", str(decoded), str(apk_path)],
+                                      output_file=str(decoded / "apktool.yml"),
+                                      timeout=300, tool_name="apktool",
+                                      errors_log=(str(_RUN_DIR / "errors.log")
+                                                  if _RUN_DIR is not None else None))
+                    else:
+                        subprocess.run([apktool, "d", "-f", "-o", str(decoded), str(apk_path)],
+                                        capture_output=True, text=True, timeout=300)
+                    _check_pause()
+                    if (decoded / "AndroidManifest.xml").exists():
+                        log(f"[extract] apktool decode successful — decoded manifest at {decoded}")
+                        status("extract", "APK extraction", "complete")
+                        return decoded
+                except Exception as exc:
+                    err(f"apktool error: {exc}")
+            else:
+                err("[extract] Neither androguard nor apktool available — binary XML cannot be decoded")
     else:
-        log("[extract] Standard APK layout confirmed (manifest and/or dex present)")
+        log("[extract] Standard APK layout confirmed (text XML manifest)")
 
     log(f"[extract] APK extraction complete — root: {dest}")
     status("extract", "APK extraction", "complete")

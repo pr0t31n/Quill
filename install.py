@@ -3,6 +3,7 @@
 import subprocess
 import sys
 import shutil
+from pathlib import Path
 
 TOOL_NAME = "Quill"
 MIN_PYTHON = (3, 10)
@@ -42,18 +43,23 @@ def install_system_deps():
 
 
 def install_pip_deps():
-    print("[install] No Python packages required (uses stdlib only).")
+    req = Path(__file__).resolve().parent / "requirements.txt"
+    if req.exists():
+        _run([sys.executable, "-m", "pip", "install",
+              "--break-system-packages", "-r", str(req)])
+    else:
+        print("[install] No requirements.txt found — skipping pip deps.")
 
 
 def main():
     if sys.version_info < MIN_PYTHON:
         print(f"ERROR: Python {'.'.join(map(str, MIN_PYTHON))}+ required")
         sys.exit(1)
-    print(f"{TOOL_NAME} v0.2.0 — Installation")
+    print(f"{TOOL_NAME} — Installation")
     install_system_deps()
     install_pip_deps()
     print(f"\n{TOOL_NAME} installed.")
-    print("Start with: python3 quill.py --ipa path/to/app.ipa")
+    print("Start with: python3 quill.py --app path/to/app.ipa")
 
 
 if __name__ == "__main__":
