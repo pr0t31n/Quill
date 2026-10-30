@@ -3492,6 +3492,12 @@ Prints structured tokens to stdout that _drain_mitm() picks up:
 import json, os, re, sys
 from mitmproxy import http
 
+def _safe_flow_content(msg):
+    try:
+        return msg.content or b""
+    except (ValueError, LookupError):
+        return msg.raw_content or b""
+
 # ── TLS auto-passthrough for cert-pinned hosts ──
 _tls_fail_counts = {}
 _passthrough_hosts = set()
