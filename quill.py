@@ -4470,8 +4470,20 @@ def _mitm_check_sensitive_urls(flows, evidence_dir):
 def _mitm_check_sensitive_bodies(flows, evidence_dir):
     seq = 2000
     for flow in flows:
-        for src_name, content in [("request", flow.request.content),
-                                  ("response", flow.response.content)]:
+        try:
+            pairs = [("request", flow.request.content),
+                     ("response", flow.response.content)]
+        except (ValueError, LookupError):
+            pairs = []
+            try:
+                pairs.append(("request", flow.request.content))
+            except (ValueError, LookupError):
+                pass
+            try:
+                pairs.append(("response", flow.response.content))
+            except (ValueError, LookupError):
+                pass
+        for src_name, content in pairs:
             if not content:
                 continue
             text = content.decode("utf-8", errors="replace")[:100000]
