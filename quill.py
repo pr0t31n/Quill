@@ -4058,7 +4058,7 @@ def mitm_capture(target_process: str, platform: str, device: str,
             "approval_tier": "auto",
             "source_tool": "quill",
             "scope": _mitm_scope,
-            "metadata": dict(metadata or {}, immediate_queue=True),
+            "metadata": dict(metadata or {}, immediate_queue=(tool.lower() != "siphon")),
         }
         _tok("__CRUCIBLE_ACTION_ITEM__", json.dumps(item))
         log(f"[mitm] Action item emitted: {tool} → {target}")
