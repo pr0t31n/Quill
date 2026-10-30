@@ -4082,25 +4082,68 @@ def mitm_capture(target_process: str, platform: str, device: str,
                 remaining_web.append(p)
         _pending_web_targets[:] = remaining_web
 
+    def _emit_noauth_action_item(category, tool, target, title, desc):
+        """Emit an action item that requires manual approval (no auth captured)."""
+        key = (tool.lower(), target.lower())
+        if key in _emitted_actions:
+            return
+        _emitted_actions.add(key)
+        item = {
+            "category": category,
+            "recommended_tool": tool,
+            "target": target,
+            "title": title,
+            "description": desc,
+            "priority": "MEDIUM",
+            "approval_tier": "manual",
+            "source_tool": "quill",
+            "scope": _mitm_scope,
+            "metadata": {"no_auth_captured": True},
+        }
+        _tok("__CRUCIBLE_ACTION_ITEM__", json.dumps(item))
+        log(f"[mitm] Action item emitted (NO AUTH — manual approval): {tool} → {target}")
+
     def _flush_all_pending():
+        authed_api = authed_web = noauth_api = noauth_web = 0
         for p in list(_pending_api_targets):
-            auth_meta = _build_auth_meta(p["host"])
-            _emit_action_item(
-                "api_discovered", "siphon", p["base"],
-                f"API endpoint from MITM capture: {p['host']}",
-                f"Quill MITM captured live API traffic to {p['host']}. "
-                f"Siphon can test this API for OWASP API Top 10 vulnerabilities.",
-                priority="HIGH", metadata=auth_meta)
+            if _has_auth_for(p["host"]):
+                auth_meta = _build_auth_meta(p["host"])
+                _emit_action_item(
+                    "api_discovered", "siphon", p["base"],
+                    f"API endpoint from MITM capture: {p['host']}",
+                    f"Quill MITM captured live API traffic to {p['host']}. "
+                    f"Siphon can test this API for OWASP API Top 10 vulnerabilities.",
+                    priority="HIGH", metadata=auth_meta)
+                authed_api += 1
+            else:
+                _emit_noauth_action_item(
+                    "api_discovered", "siphon", p["base"],
+                    f"API endpoint from MITM capture (no auth): {p['host']}",
+                    f"Quill MITM captured live API traffic to {p['host']} but no "
+                    f"authentication was captured. Manual auth configuration required.")
+                noauth_api += 1
         _pending_api_targets.clear()
         for p in list(_pending_web_targets):
-            auth_meta = _build_auth_meta(p["host"], prefer_cookie=True)
-            _emit_action_item(
-                "webapp_discovered", "fracture", p["base"],
-                f"Web target from MITM capture: {p['host']}",
-                f"Quill MITM captured live web traffic to {p['host']}. "
-                f"Fracture can test this web app for OWASP Top 10 vulnerabilities.",
-                priority="HIGH", metadata=auth_meta)
+            if _has_auth_for(p["host"]):
+                auth_meta = _build_auth_meta(p["host"], prefer_cookie=True)
+                _emit_action_item(
+                    "webapp_discovered", "fracture", p["base"],
+                    f"Web target from MITM capture: {p['host']}",
+                    f"Quill MITM captured live web traffic to {p['host']}. "
+                    f"Fracture can test this web app for OWASP Top 10 vulnerabilities.",
+                    priority="HIGH", metadata=auth_meta)
+                authed_web += 1
+            else:
+                _emit_noauth_action_item(
+                    "webapp_discovered", "fracture", p["base"],
+                    f"Web target from MITM capture (no auth): {p['host']}",
+                    f"Quill MITM captured live web traffic to {p['host']} but no "
+                    f"authentication was captured. Manual auth configuration required.")
+                noauth_web += 1
         _pending_web_targets.clear()
+        if noauth_api or noauth_web:
+            log(f"[mitm] {noauth_api} API + {noauth_web} web targets emitted "
+                f"WITHOUT auth (manual approval required)")
 
     def _drain_mitm(stream, label):
         try:
@@ -4253,8 +4296,12 @@ def mitm_capture(target_process: str, platform: str, device: str,
     _t_out.join(timeout=5)
     _t_err.join(timeout=5)
     if _pending_api_targets or _pending_web_targets:
+        n_authed = sum(1 for p in _pending_api_targets if _has_auth_for(p["host"])) + \
+                   sum(1 for p in _pending_web_targets if _has_auth_for(p["host"]))
+        n_noauth = (len(_pending_api_targets) + len(_pending_web_targets)) - n_authed
         log(f"[mitm] Flushing {len(_pending_api_targets)} API + "
-            f"{len(_pending_web_targets)} web buffered targets (MITM ended)")
+            f"{len(_pending_web_targets)} web buffered targets (MITM ended) — "
+            f"{n_authed} with auth (auto), {n_noauth} without auth (manual)")
         _flush_all_pending()
     mitm_stdout = "\n".join(_mitm_lines)[:8_000_000]
     mitm_stderr = ""
