@@ -46,7 +46,8 @@ def install_pip_deps():
     req = Path(__file__).resolve().parent / "requirements.txt"
     if req.exists():
         _run([sys.executable, "-m", "pip", "install",
-              "--break-system-packages", "-r", str(req)])
+              "--break-system-packages", "--ignore-installed",
+              "-r", str(req)])
     else:
         print("[install] No requirements.txt found — skipping pip deps.")
 
