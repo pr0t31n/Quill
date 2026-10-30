@@ -4000,6 +4000,14 @@ def mitm_capture(target_process: str, platform: str, device: str,
     host_ip = "127.0.0.1"
     if platform == "android" and adb_bin:
         try:
+            subprocess.run([adb_bin, "shell", "settings", "put", "global",
+                            "http_proxy", ":0"], capture_output=True, timeout=5)
+            subprocess.run([adb_bin, "shell", "settings", "delete", "global",
+                            "http_proxy"], capture_output=True, timeout=5)
+            log("[mitm] Cleared stale Android proxy settings")
+        except Exception:
+            pass
+        try:
             r = subprocess.run([adb_bin, "shell", "ip", "route", "show", "default"],
                                capture_output=True, text=True, timeout=5)
             m = re.search(r'via\s+(\d+\.\d+\.\d+\.\d+)', r.stdout)
@@ -4377,7 +4385,9 @@ def mitm_capture(target_process: str, platform: str, device: str,
         try:
             subprocess.run([adb_bin, "shell", "settings", "put", "global",
                             "http_proxy", ":0"], capture_output=True, timeout=5)
-            log("[mitm] Android proxy cleared")
+            subprocess.run([adb_bin, "shell", "settings", "delete", "global",
+                            "http_proxy"], capture_output=True, timeout=5)
+            log("[mitm] Android proxy cleared and deleted")
         except Exception:
             pass
     if _ur is not None:
