@@ -4001,6 +4001,8 @@ def mitm_capture(target_process: str, platform: str, device: str,
     _captured_api: list = []
     _captured_web: list = []
     _emitted_actions: set = set()
+    _pending_api_targets: list = []
+    _pending_web_targets: list = []
 
     _mitm_scope = os.environ.get("CRUCIBLE_SCOPE", "")
 
@@ -4025,6 +4027,81 @@ def mitm_capture(target_process: str, platform: str, device: str,
         _tok("__CRUCIBLE_ACTION_ITEM__", json.dumps(item))
         log(f"[mitm] Action item emitted: {tool} → {target}")
 
+    def _build_auth_meta(host, prefer_cookie=False):
+        meta = {}
+        for a in _captured_auth:
+            if a.get("host") != host:
+                continue
+            if prefer_cookie:
+                if a.get("cookie"):
+                    meta.setdefault("auth_cookies", {})[a["cookie"]] = a.get("value", "")
+                elif a.get("header"):
+                    meta["auth_header"] = a["header"]
+                    meta["auth_value"] = a.get("value", "")
+            else:
+                if a.get("header"):
+                    meta["auth_header"] = a["header"]
+                    meta["auth_value"] = a.get("value", "")
+                elif a.get("cookie"):
+                    meta.setdefault("auth_cookies", {})[a["cookie"]] = a.get("value", "")
+                elif a.get("json_field"):
+                    meta["auth_token_field"] = a["json_field"]
+                    meta["auth_token_value"] = a.get("value", "")
+            break
+        return meta
+
+    def _has_auth_for(host):
+        return any(a.get("host") == host for a in _captured_auth)
+
+    def _flush_pending_for_host(host):
+        remaining_api = []
+        for p in _pending_api_targets:
+            if p["host"] == host:
+                auth_meta = _build_auth_meta(host)
+                _emit_action_item(
+                    "api_discovered", "siphon", p["base"],
+                    f"API endpoint from MITM capture: {host}",
+                    f"Quill MITM captured live API traffic to {host}. "
+                    f"Siphon can test this API for OWASP API Top 10 vulnerabilities.",
+                    priority="HIGH", metadata=auth_meta)
+            else:
+                remaining_api.append(p)
+        _pending_api_targets[:] = remaining_api
+
+        remaining_web = []
+        for p in _pending_web_targets:
+            if p["host"] == host:
+                auth_meta = _build_auth_meta(host, prefer_cookie=True)
+                _emit_action_item(
+                    "webapp_discovered", "fracture", p["base"],
+                    f"Web target from MITM capture: {host}",
+                    f"Quill MITM captured live web traffic to {host}. "
+                    f"Fracture can test this web app for OWASP Top 10 vulnerabilities.",
+                    priority="HIGH", metadata=auth_meta)
+            else:
+                remaining_web.append(p)
+        _pending_web_targets[:] = remaining_web
+
+    def _flush_all_pending():
+        for p in list(_pending_api_targets):
+            auth_meta = _build_auth_meta(p["host"])
+            _emit_action_item(
+                "api_discovered", "siphon", p["base"],
+                f"API endpoint from MITM capture: {p['host']}",
+                f"Quill MITM captured live API traffic to {p['host']}. "
+                f"Siphon can test this API for OWASP API Top 10 vulnerabilities.",
+                priority="HIGH", metadata=auth_meta)
+        _pending_api_targets.clear()
+        for p in list(_pending_web_targets):
+            auth_meta = _build_auth_meta(p["host"], prefer_cookie=True)
+            _emit_action_item(
+                "webapp_discovered", "fracture", p["base"],
+                f"Web target from MITM capture: {p['host']}",
+                f"Quill MITM captured live web traffic to {p['host']}. "
+                f"Fracture can test this web app for OWASP Top 10 vulnerabilities.",
+                priority="HIGH", metadata=auth_meta)
+        _pending_web_targets.clear()
+
     def _drain_mitm(stream, label):
         try:
             for raw in iter(stream.readline, b""):
@@ -4039,6 +4116,7 @@ def mitm_capture(target_process: str, platform: str, device: str,
                         host = payload.get("host", "")
                         auth_type = payload.get("header") or payload.get("cookie") or payload.get("json_field") or payload.get("set_cookie") or "unknown"
                         log(f"[mitm] Auth captured: {auth_type} from {host}")
+                        _flush_pending_for_host(host)
                     except Exception:
                         pass
                 elif line.startswith("__QUILL_API__:"):
@@ -4048,24 +4126,17 @@ def mitm_capture(target_process: str, platform: str, device: str,
                         host = payload.get("host", "")
                         base = payload.get("base_url", "")
                         log(f"[mitm] API target detected: {host}")
-                        auth_meta = {}
-                        for a in _captured_auth:
-                            if a.get("host") == host:
-                                if a.get("header"):
-                                    auth_meta["auth_header"] = a["header"]
-                                    auth_meta["auth_value"] = a.get("value", "")
-                                elif a.get("cookie"):
-                                    auth_meta.setdefault("auth_cookies", {})[a["cookie"]] = a.get("value", "")
-                                elif a.get("json_field"):
-                                    auth_meta["auth_token_field"] = a["json_field"]
-                                    auth_meta["auth_token_value"] = a.get("value", "")
-                                break
-                        _emit_action_item(
-                            "api_discovered", "siphon", base,
-                            f"API endpoint from MITM capture: {host}",
-                            f"Quill MITM captured live API traffic to {host}. "
-                            f"Siphon can test this API for OWASP API Top 10 vulnerabilities.",
-                            priority="HIGH", metadata=auth_meta)
+                        if _has_auth_for(host):
+                            auth_meta = _build_auth_meta(host)
+                            _emit_action_item(
+                                "api_discovered", "siphon", base,
+                                f"API endpoint from MITM capture: {host}",
+                                f"Quill MITM captured live API traffic to {host}. "
+                                f"Siphon can test this API for OWASP API Top 10 vulnerabilities.",
+                                priority="HIGH", metadata=auth_meta)
+                        else:
+                            _pending_api_targets.append({"host": host, "base": base})
+                            log(f"[mitm] API target {host} buffered — waiting for auth")
                     except Exception:
                         pass
                 elif line.startswith("__QUILL_WEB__:"):
@@ -4075,21 +4146,17 @@ def mitm_capture(target_process: str, platform: str, device: str,
                         host = payload.get("host", "")
                         base = payload.get("base_url", "")
                         log(f"[mitm] Web target detected: {host}")
-                        auth_meta = {}
-                        for a in _captured_auth:
-                            if a.get("host") == host:
-                                if a.get("cookie"):
-                                    auth_meta.setdefault("auth_cookies", {})[a["cookie"]] = a.get("value", "")
-                                elif a.get("header"):
-                                    auth_meta["auth_header"] = a["header"]
-                                    auth_meta["auth_value"] = a.get("value", "")
-                                break
-                        _emit_action_item(
-                            "webapp_discovered", "fracture", base,
-                            f"Web target from MITM capture: {host}",
-                            f"Quill MITM captured live web traffic to {host}. "
-                            f"Fracture can test this web app for OWASP Top 10 vulnerabilities.",
-                            priority="HIGH", metadata=auth_meta)
+                        if _has_auth_for(host):
+                            auth_meta = _build_auth_meta(host, prefer_cookie=True)
+                            _emit_action_item(
+                                "webapp_discovered", "fracture", base,
+                                f"Web target from MITM capture: {host}",
+                                f"Quill MITM captured live web traffic to {host}. "
+                                f"Fracture can test this web app for OWASP Top 10 vulnerabilities.",
+                                priority="HIGH", metadata=auth_meta)
+                        else:
+                            _pending_web_targets.append({"host": host, "base": base})
+                            log(f"[mitm] Web target {host} buffered — waiting for auth")
                     except Exception:
                         pass
                 else:
@@ -4185,6 +4252,10 @@ def mitm_capture(target_process: str, platform: str, device: str,
     mitm_ended = datetime.now(timezone.utc)
     _t_out.join(timeout=5)
     _t_err.join(timeout=5)
+    if _pending_api_targets or _pending_web_targets:
+        log(f"[mitm] Flushing {len(_pending_api_targets)} API + "
+            f"{len(_pending_web_targets)} web buffered targets (MITM ended)")
+        _flush_all_pending()
     mitm_stdout = "\n".join(_mitm_lines)[:8_000_000]
     mitm_stderr = ""
     if frida_proc is not None:
