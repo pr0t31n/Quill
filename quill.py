@@ -33,22 +33,7 @@ from typing import Optional
 
 VERSION = Path(__file__).resolve().parent.joinpath("VERSION").read_text().strip()
 
-# ADB proxy cleanup on any exit (SIGTERM from Crucible Kill, normal exit, etc.)
-_ADB_PROXY_ACTIVE = False
-_ADB_BIN: str | None = None
-
-def _adb_proxy_atexit():
-    if _ADB_PROXY_ACTIVE and _ADB_BIN:
-        try:
-            subprocess.run([_ADB_BIN, "shell", "settings", "put", "global",
-                            "http_proxy", ":0"], capture_output=True, timeout=5)
-            subprocess.run([_ADB_BIN, "shell", "settings", "delete", "global",
-                            "http_proxy"], capture_output=True, timeout=5)
-        except Exception:
-            pass
-
-import atexit, signal as _sig
-atexit.register(_adb_proxy_atexit)
+import atexit as _atexit_mod, signal as _sig
 _sig.signal(_sig.SIGTERM, lambda s, f: sys.exit(128 + s))
 
 try:
@@ -4013,40 +3998,9 @@ def mitm_capture(target_process: str, platform: str, device: str,
         ssl_script_file = mitm_dir / "ssl_bypass.js"
         ssl_script_file.write_text(ssl_script, encoding="utf-8")
 
-    adb_bin = shutil.which("adb")
-    proxy_configured = False
-    host_ip = "127.0.0.1"
-    if platform == "android" and adb_bin:
-        try:
-            subprocess.run([adb_bin, "shell", "settings", "put", "global",
-                            "http_proxy", ":0"], capture_output=True, timeout=5)
-            subprocess.run([adb_bin, "shell", "settings", "delete", "global",
-                            "http_proxy"], capture_output=True, timeout=5)
-            log("[mitm] Cleared stale Android proxy settings")
-        except Exception:
-            pass
-        try:
-            r = subprocess.run([adb_bin, "shell", "ip", "route", "show", "default"],
-                               capture_output=True, text=True, timeout=5)
-            m = re.search(r'via\s+(\d+\.\d+\.\d+\.\d+)', r.stdout)
-            if m:
-                host_ip = m.group(1)
-        except Exception:
-            pass
-        try:
-            subprocess.run([adb_bin, "shell", "settings", "put", "global",
-                            "http_proxy", f"{host_ip}:{port}"],
-                           capture_output=True, timeout=5)
-            proxy_configured = True
-            global _ADB_PROXY_ACTIVE, _ADB_BIN
-            _ADB_PROXY_ACTIVE = True
-            _ADB_BIN = adb_bin
-            log(f"[mitm] Android proxy configured via adb: {host_ip}:{port}")
-        except Exception as exc:
-            log(f"[mitm] Could not auto-configure Android proxy: {exc}")
-    if not proxy_configured:
-        log(f"[mitm] Configure device proxy manually: {host_ip}:{port}")
-        status("mitm_capture", f"Set device proxy to {host_ip}:{port}", "waiting")
+    log(f"[mitm] Proxy listening on port {port} — "
+        "ensure device proxy points to this host")
+    status("mitm_capture", f"Proxy on :{port} — configure device", "running")
 
     if upstream_proxy:
         mode = f"upstream:{upstream_proxy}"
@@ -4400,16 +4354,6 @@ def mitm_capture(target_process: str, platform: str, device: str,
         try:
             frida_proc.kill()
             frida_proc.wait(timeout=5)
-        except Exception:
-            pass
-    if proxy_configured and adb_bin:
-        try:
-            subprocess.run([adb_bin, "shell", "settings", "put", "global",
-                            "http_proxy", ":0"], capture_output=True, timeout=5)
-            subprocess.run([adb_bin, "shell", "settings", "delete", "global",
-                            "http_proxy"], capture_output=True, timeout=5)
-            _ADB_PROXY_ACTIVE = False
-            log("[mitm] Android proxy cleared and deleted")
         except Exception:
             pass
     if _ur is not None:
