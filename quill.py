@@ -3619,9 +3619,10 @@ def response(flow: http.HTTPFlow):
 
     # Auth capture — JSON body tokens
     ct = (flow.response.headers.get("content-type", "") or "").lower()
-    if "json" in ct and flow.response.content:
+    _resp_bytes = _safe_flow_content(flow.response)
+    if "json" in ct and _resp_bytes:
         try:
-            body = json.loads(flow.response.content[:65536])
+            body = json.loads(_resp_bytes[:65536])
             if isinstance(body, dict):
                 for tk in ("access_token", "token", "id_token",
                            "refresh_token", "jwt", "session_token",
@@ -3814,6 +3815,13 @@ _PII_BODY_PATTERNS = {
 }
 
 
+def _safe_flow_content(msg) -> bytes:
+    try:
+        return msg.content or b""
+    except (ValueError, LookupError):
+        return msg.raw_content or b""
+
+
 def _safe_evidence_path(method: str, url_path: str) -> str:
     safe = re.sub(r'[^a-zA-Z0-9._/-]', '_', url_path)[:80]
     safe = safe.strip("/").replace("/", "__")
@@ -3834,7 +3842,8 @@ def _write_mitm_evidence(flow, evidence_dir: Path, seq: int):
     for k, v in flow.request.headers.items():
         req_lines.append(f"{k}: {v}")
     req_lines.append("")
-    body = (flow.request.content or b"").decode("utf-8", errors="replace")[:50000]
+    req_bytes = _safe_flow_content(flow.request)
+    body = req_bytes.decode("utf-8", errors="replace")[:50000]
     if body:
         req_lines.append(body)
     req_file = safe_dir / f"{prefix}_request.txt"
@@ -3844,7 +3853,8 @@ def _write_mitm_evidence(flow, evidence_dir: Path, seq: int):
     for k, v in flow.response.headers.items():
         resp_lines.append(f"{k}: {v}")
     resp_lines.append("")
-    rbody = (flow.response.content or b"").decode("utf-8", errors="replace")[:50000]
+    resp_bytes = _safe_flow_content(flow.response)
+    rbody = resp_bytes.decode("utf-8", errors="replace")[:50000]
     if rbody:
         resp_lines.append(rbody)
     resp_file = safe_dir / f"{prefix}_response.txt"
@@ -3858,8 +3868,8 @@ def _write_mitm_evidence(flow, evidence_dir: Path, seq: int):
         f"# Request: {flow.request.method} {flow.request.url}",
         f"# Status: {flow.response.status_code}",
         f"# Duration: {dur:.3f}s",
-        f"# Request size: {len(flow.request.content or b'')} bytes",
-        f"# Response size: {len(flow.response.content or b'')} bytes",
+        f"# Request size: {len(req_bytes)} bytes",
+        f"# Response size: {len(resp_bytes)} bytes",
     ]), encoding="utf-8")
     return _rel(str(req_file)), _rel(str(resp_file)), _rel(str(log_file))
 
@@ -4470,19 +4480,8 @@ def _mitm_check_sensitive_urls(flows, evidence_dir):
 def _mitm_check_sensitive_bodies(flows, evidence_dir):
     seq = 2000
     for flow in flows:
-        try:
-            pairs = [("request", flow.request.content),
-                     ("response", flow.response.content)]
-        except (ValueError, LookupError):
-            pairs = []
-            try:
-                pairs.append(("request", flow.request.content))
-            except (ValueError, LookupError):
-                pass
-            try:
-                pairs.append(("response", flow.response.content))
-            except (ValueError, LookupError):
-                pass
+        pairs = [("request", _safe_flow_content(flow.request)),
+                 ("response", _safe_flow_content(flow.response))]
         for src_name, content in pairs:
             if not content:
                 continue
@@ -4536,9 +4535,9 @@ def _mitm_check_api_keys(flows, evidence_dir):
     for flow in flows:
         for src_name, text in [
             ("request headers", "\n".join(f"{k}: {v}" for k, v in flow.request.headers.items())),
-            ("request body", (flow.request.content or b"").decode("utf-8", errors="replace")[:100000]),
+            ("request body", _safe_flow_content(flow.request).decode("utf-8", errors="replace")[:100000]),
             ("request URL", flow.request.url),
-            ("response body", (flow.response.content or b"").decode("utf-8", errors="replace")[:100000]),
+            ("response body", _safe_flow_content(flow.response).decode("utf-8", errors="replace")[:100000]),
         ]:
             if not text:
                 continue
@@ -4630,7 +4629,7 @@ def _mitm_check_trackers(flows, evidence_dir):
                 if tracker_name in seen:
                     continue
                 seen.add(tracker_name)
-                body = (flow.request.content or b"").decode("utf-8", errors="replace")[:50000]
+                body = _safe_flow_content(flow.request).decode("utf-8", errors="replace")[:50000]
                 data_types = []
                 if re.search(r'(?:device_?id|idfa|gaid|advertisingId)', body, re.IGNORECASE):
                     data_types.append("device identifiers")
@@ -4728,21 +4727,22 @@ def _mitm_write_har(flows, har_path: Path) -> None:
                 "method": flow.request.method, "url": flow.request.url,
                 "httpVersion": flow.request.http_version,
                 "headers": [{"name": k, "value": v} for k, v in flow.request.headers.items()],
-                "headersSize": -1, "bodySize": len(flow.request.content or b""),
+                "headersSize": -1, "bodySize": len(_safe_flow_content(flow.request)),
             },
             "response": {
                 "status": flow.response.status_code,
                 "statusText": flow.response.reason or "",
                 "httpVersion": flow.response.http_version,
                 "headers": [{"name": k, "value": v} for k, v in flow.response.headers.items()],
-                "headersSize": -1, "bodySize": len(flow.response.content or b""),
+                "headersSize": -1, "bodySize": len(_safe_flow_content(flow.response)),
             },
             "timings": {"send": -1, "wait": round(dur, 2), "receive": -1},
         }
-        if flow.request.content:
+        _har_req_bytes = _safe_flow_content(flow.request)
+        if _har_req_bytes:
             entry["request"]["postData"] = {
                 "mimeType": flow.request.headers.get("content-type", ""),
-                "text": flow.request.content.decode("utf-8", errors="replace")[:50000],
+                "text": _har_req_bytes.decode("utf-8", errors="replace")[:50000],
             }
         entries.append(entry)
     har = {"log": {"version": "1.2",
@@ -4812,8 +4812,8 @@ def _mitm_write_traffic_analysis(flows, analysis_path: Path) -> None:
             hosts[host] = {"request_count": 0, "schemes": set()}
         hosts[host]["request_count"] += 1
         hosts[host]["schemes"].add(flow.request.scheme)
-        total_req += len(flow.request.content or b"")
-        total_resp += len(flow.response.content or b"")
+        total_req += len(_safe_flow_content(flow.request))
+        total_resp += len(_safe_flow_content(flow.response))
         methods[flow.request.method] = methods.get(flow.request.method, 0) + 1
         sc = flow.response.status_code
         status_codes[sc] = status_codes.get(sc, 0) + 1
