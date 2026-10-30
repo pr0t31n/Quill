@@ -30,6 +30,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+import queue as _queue_mod
 
 VERSION = Path(__file__).resolve().parent.joinpath("VERSION").read_text().strip()
 
@@ -72,6 +73,8 @@ _RUNLOG = None
 _pause = None
 _APP_TARGET = ""
 _EXTRACT_BASE: Optional[Path] = None
+_answer_queue: _queue_mod.Queue = _queue_mod.Queue()
+_ALL_PHASES = {"recon", "storage", "ipc", "logs", "memory", "resilience", "instrumentation"}
 
 _CSV_FIELDS = ["id", "tool", "title", "datetime", "ip", "port", "hostname",
                "risk", "command", "description", "output_file", "affected",
@@ -5034,6 +5037,159 @@ def _detect_platform(file_path: str) -> str:
     return ""
 
 
+def _handle_prompt_response(data: dict) -> None:
+    try:
+        _answer_queue.put_nowait(data)
+    except Exception:
+        pass
+
+
+def _phase_finding_adapter(**kwargs) -> None:
+    data = {}
+    if "catalogue_id" in kwargs:
+        data["catalogue_id"] = kwargs.pop("catalogue_id")
+    if "affected" in kwargs:
+        data["affected"] = kwargs.pop("affected")
+    if "remediation" in kwargs:
+        data["remediation"] = kwargs.pop("remediation")
+    if "command" in kwargs:
+        data["command"] = kwargs.pop("command")
+    extra_keys = set(kwargs.keys()) - {"title", "severity", "description", "output_file", "output"}
+    for k in extra_keys:
+        data[k] = kwargs.pop(k)
+    finding(
+        title=kwargs.get("title", ""),
+        severity=kwargs.get("severity", "INFO"),
+        description=kwargs.get("description", ""),
+        data=data if data else None,
+        output_file=kwargs.get("output_file", ""),
+        output=kwargs.get("output", ""),
+    )
+
+
+def _load_frida_scripts(scripts_dir: Path) -> dict[str, str]:
+    scripts = {}
+    if not scripts_dir.exists():
+        return scripts
+    for js_file in sorted(scripts_dir.glob("*.js")):
+        try:
+            scripts[js_file.stem] = js_file.read_text(encoding="utf-8")
+            log(f"[phases] Loaded Frida script: {js_file.name}")
+        except Exception as exc:
+            err(f"[phases] Failed to load {js_file.name}: {exc}")
+    return scripts
+
+
+def _run_phases(platform: str, app_dir: Path | None, project_dir: Path,
+                device_id: str, target_process: str,
+                enabled_phases: set[str] | None,
+                frida_scripts_dir: Path) -> list:
+    _quill_dir = Path(__file__).resolve().parent
+    if str(_quill_dir) not in sys.path:
+        sys.path.insert(0, str(_quill_dir))
+
+    try:
+        from phases.base import PhaseOrchestrator, PhaseResult
+        from phases.recon import ReconPhase
+        from phases.storage import StoragePhase
+        from phases.ipc import IPCPhase
+        from phases.logs import LogsPhase
+        from phases.memory import MemoryPhase
+        from phases.resilience import ResiliencePhase
+        from phases.instrumentation import InstrumentationPhase
+    except ImportError as exc:
+        err(f"[phases] Failed to import phase modules: {exc}")
+        log("[phases] Phase system unavailable — skipping")
+        return []
+
+    device = None
+    needs_device = False
+    if enabled_phases is None:
+        needs_device = True
+    else:
+        _device_phases = {"storage", "ipc", "logs", "memory", "resilience", "instrumentation"}
+        needs_device = bool(enabled_phases & _device_phases)
+
+    if needs_device:
+        try:
+            from device import connect as _dev_connect
+            log(f"[phases] Connecting to {platform} device (id={device_id or 'auto'})...")
+            device = _dev_connect(platform, device_id=device_id)
+            if device.connect():
+                info = device.get_device_info()
+                log(f"[phases] Connected: {info.model} ({info.os_version}), "
+                    f"rooted={info.rooted}, frida={info.frida_available}")
+            else:
+                err("[phases] Device connection failed — phases requiring a device will be skipped")
+                device = None
+        except ImportError:
+            err("[phases] Device module not available — device phases will be skipped")
+        except Exception as exc:
+            err(f"[phases] Device connection error: {exc}")
+            device = None
+
+    context = {
+        "platform": platform,
+        "package": target_process,
+        "app_dir": str(app_dir) if app_dir else None,
+        "frida_scripts": _load_frida_scripts(frida_scripts_dir),
+        "target_process": target_process,
+    }
+
+    if app_dir:
+        manifest_path = app_dir / "AndroidManifest.xml"
+        plist_path = app_dir / "Info.plist"
+        if manifest_path.exists() or plist_path.exists():
+            context["app_binary_available"] = True
+
+    log(f"[phases] Creating orchestrator — "
+        f"enabled={sorted(enabled_phases) if enabled_phases else 'all'}")
+
+    orch = PhaseOrchestrator(
+        device=device,
+        context=context,
+        output_dir=project_dir,
+        tok_fn=_tok,
+        log_fn=log,
+        err_fn=err,
+        status_fn=status,
+        finding_fn=_phase_finding_adapter,
+        check_pause_fn=_check_pause,
+    )
+
+    all_phases = [
+        ReconPhase(),
+        StoragePhase(),
+        IPCPhase(),
+        LogsPhase(),
+        MemoryPhase(),
+        ResiliencePhase(),
+        InstrumentationPhase(),
+    ]
+    orch.register_all(all_phases)
+
+    log("[phases] Starting phase orchestrator...")
+    results = orch.run_all(enabled_phases=enabled_phases)
+
+    total_findings = sum(r.findings_count for r in results if not r.skipped)
+    completed = sum(1 for r in results if r.success and not r.skipped)
+    skipped = sum(1 for r in results if r.skipped)
+    failed = sum(1 for r in results if not r.success and not r.skipped)
+    duration = sum(r.duration_seconds for r in results)
+    log(f"[phases] Phase system complete — {completed} completed, "
+        f"{skipped} skipped, {failed} failed, "
+        f"{total_findings} finding(s), {duration:.1f}s total")
+
+    if device is not None:
+        try:
+            device.disconnect()
+            log("[phases] Device disconnected")
+        except Exception:
+            pass
+
+    return results
+
+
 def main() -> int:
     global _pause
 
@@ -5076,6 +5232,12 @@ def main() -> int:
                           "Use for SDK domains that pin certificates")
     p.add_argument("--project", help="Override project output directory")
     p.add_argument("--version", action="store_true")
+    p.add_argument("--phases", default="all",
+                     help="Comma-separated phase names to run (recon,storage,ipc,logs,"
+                          "memory,resilience,instrumentation). Default: all. "
+                          "Use 'none' to skip the phase system entirely.")
+    p.add_argument("--no-phases", action="store_true",
+                     help="Skip the modular phase system entirely (legacy mode)")
     args = p.parse_args()
 
     if args.version:
@@ -5245,6 +5407,46 @@ def main() -> int:
             compute_file_hashes(Path(app_path), project_dir)
         elif not run_static:
             log("[main] Static analysis skipped (mode=dynamic)")
+
+    # ── Phase system ──────────────────────────────────────────────────
+    _skip_phases = args.no_phases or args.phases.lower() == "none"
+    if not _skip_phases:
+        _phase_set = None
+        if args.phases.lower() != "all":
+            _phase_set = set(p.strip() for p in args.phases.split(",") if p.strip())
+            _unknown = _phase_set - _ALL_PHASES
+            if _unknown:
+                log(f"[phases] Warning: unknown phase(s) ignored: {sorted(_unknown)}")
+                _phase_set -= _unknown
+            if not _phase_set:
+                log("[phases] No valid phases specified — skipping phase system")
+                _skip_phases = True
+        if not _skip_phases:
+            _frida_dir = Path(__file__).resolve().parent / "frida_scripts"
+            _target_proc = args.target_process
+            if not _target_proc:
+                if platform == "android" and app_dir:
+                    _m = app_dir / "AndroidManifest.xml"
+                    if not _m.exists():
+                        _m = extract_dir / "AndroidManifest.xml"
+                    if _m.exists():
+                        try:
+                            _target_proc = ET.parse(_m).getroot().get("package", "")
+                        except Exception:
+                            pass
+                if not _target_proc and app_path:
+                    _target_proc = Path(app_path).stem
+            _phase_results = _run_phases(
+                platform=platform,
+                app_dir=app_dir,
+                project_dir=project_dir,
+                device_id=args.device,
+                target_process=_target_proc or "",
+                enabled_phases=_phase_set,
+                frida_scripts_dir=_frida_dir,
+            )
+    else:
+        log("[phases] Phase system disabled (--no-phases or --phases none)")
 
     _check_pause()
     if run_dynamic:
