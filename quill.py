@@ -3478,15 +3478,28 @@ if (ObjC.available) {
 
 
 _MITM_AUTH_CAPTURE_ADDON = r'''
-"""mitmdump addon — real-time auth/API/web target capture for Quill auto-queue.
+"""mitmdump addon — real-time auth/API/web target capture + TLS auto-passthrough.
 
 Prints structured tokens to stdout that _drain_mitm() picks up:
-  __QUILL_AUTH__:<json>     — captured auth token / session cookie
-  __QUILL_API__:<json>      — API endpoint detected
-  __QUILL_WEB__:<json>      — web app target detected
+  __QUILL_AUTH__:<json>         — captured auth token / session cookie
+  __QUILL_API__:<json>          — API endpoint detected
+  __QUILL_WEB__:<json>          — web app target detected
+  __QUILL_PASSTHROUGH__:<json>  — host added to TLS passthrough (cert pinning)
 """
-import json, re, sys
+import json, os, re, sys
 from mitmproxy import http
+
+# ── TLS auto-passthrough for cert-pinned hosts ──
+_tls_fail_counts = {}
+_passthrough_hosts = set()
+_PASSTHROUGH_THRESHOLD = 2
+
+_preseed = os.environ.get("QUILL_MITM_PASSTHROUGH_HOSTS", "")
+if _preseed:
+    for _h in _preseed.split(","):
+        _h = _h.strip()
+        if _h:
+            _passthrough_hosts.add(_h)
 
 _seen_hosts = set()
 _seen_auth = set()
@@ -3506,6 +3519,38 @@ _AUTH_COOKIES = ("session", "sid", "token", "jwt", "auth", "access_token",
 
 def _emit(tag, payload):
     print(f"{tag}:{json.dumps(payload)}", flush=True)
+
+def tls_clienthello(data):
+    sni = data.client_hello.sni or ""
+    if not sni:
+        return
+    if sni in _passthrough_hosts:
+        data.ignore_connection = True
+        return
+    for pat in list(_passthrough_hosts):
+        if pat != sni:
+            try:
+                if re.fullmatch(pat, sni):
+                    data.ignore_connection = True
+                    return
+            except re.error:
+                pass
+
+def tls_failed_client(data):
+    sni = getattr(data.conn, "sni", "") or ""
+    if not sni or sni in _passthrough_hosts:
+        return
+    _tls_fail_counts[sni] = _tls_fail_counts.get(sni, 0) + 1
+    if _tls_fail_counts[sni] >= _PASSTHROUGH_THRESHOLD:
+        _passthrough_hosts.add(sni)
+        _emit("__QUILL_PASSTHROUGH__", {
+            "host": sni, "reason": "cert_pinning",
+            "failures": _tls_fail_counts[sni]})
+
+def tls_established_client(data):
+    sni = getattr(data.conn, "sni", "") or ""
+    if sni in _tls_fail_counts:
+        del _tls_fail_counts[sni]
 
 def _is_api(flow):
     ct = (flow.response.headers.get("content-type", "") or "").lower()
@@ -3901,7 +3946,8 @@ def mitm_capture(target_process: str, platform: str, device: str,
                  output_dir: Path, *, port: int = 8080,
                  transparent: bool = False,
                  upstream_proxy: str = "",
-                 burp_ca: str = "", **_kw) -> Optional[Path]:
+                 burp_ca: str = "",
+                 ignore_hosts: str = "", **_kw) -> Optional[Path]:
     _check_pause()
     _save_checkpoint()
     log(f"[mitm] Starting MITM traffic capture — port={port}, "
@@ -3987,13 +4033,20 @@ def mitm_capture(target_process: str, platform: str, device: str,
                 "--set", "stream_large_bodies=5m"]
     _confdir = _custom_confdir or _PERSISTENT_CA_DIR
     mitm_cmd.extend(["--set", f"confdir={_confdir}"])
+    if ignore_hosts:
+        mitm_cmd.extend(["--ignore-hosts", ignore_hosts])
+        log(f"[mitm] Pre-seeded ignore hosts: {ignore_hosts}")
     addon_file = mitm_dir / "_auth_capture.py"
     addon_file.write_text(_MITM_AUTH_CAPTURE_ADDON, encoding="utf-8")
     mitm_cmd.extend(["-s", str(addon_file)])
-    log("[mitm] Auth/API capture addon loaded")
+    log("[mitm] Auth/API/TLS-passthrough addon loaded")
     log(f"[mitm] Launching mitmdump: {' '.join(mitm_cmd)}")
     mitm_started = datetime.now(timezone.utc)
-    mitm_proc = subprocess.Popen(mitm_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    _mitm_env = dict(os.environ)
+    if ignore_hosts:
+        _mitm_env["QUILL_MITM_PASSTHROUGH_HOSTS"] = ignore_hosts.replace("|", ",")
+    mitm_proc = subprocess.Popen(mitm_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 env=_mitm_env)
 
     import threading as _thr_mod
     _mitm_lines = []
@@ -4200,6 +4253,15 @@ def mitm_capture(target_process: str, platform: str, device: str,
                         else:
                             _pending_web_targets.append({"host": host, "base": base})
                             log(f"[mitm] Web target {host} buffered — waiting for auth")
+                    except Exception:
+                        pass
+                elif line.startswith("__QUILL_PASSTHROUGH__:"):
+                    try:
+                        payload = json.loads(line[len("__QUILL_PASSTHROUGH__:"):])
+                        host = payload.get("host", "")
+                        failures = payload.get("failures", 0)
+                        log(f"[mitm] Auto-passthrough: {host} — cert pinning detected "
+                            f"after {failures} TLS failures (future connections bypass MITM)")
                     except Exception:
                         pass
                 else:
@@ -5014,6 +5076,10 @@ def main() -> int:
                      help="Path to upstream proxy's CA (cert+key PEM) — "
                           "Quill signs with this CA so the device only "
                           "needs one CA trusted, not two")
+    p.add_argument("--mitm-ignore-hosts", default="",
+                     help="Regex of hosts to pass through without intercepting "
+                          "(e.g. '.*\\.sentry\\.io|.*\\.mixpanel\\.com'). "
+                          "Use for SDK domains that pin certificates")
     p.add_argument("--project", help="Override project output directory")
     p.add_argument("--version", action="store_true")
     args = p.parse_args()
@@ -5240,7 +5306,8 @@ def main() -> int:
             port=args.mitm_port,
             transparent=args.mitm_transparent,
             upstream_proxy=args.mitm_upstream_proxy,
-            burp_ca=args.mitm_burp_ca)
+            burp_ca=args.mitm_burp_ca,
+            ignore_hosts=args.mitm_ignore_hosts)
         if flows_file:
             mitm_analyse(project_dir, flows_file)
 
