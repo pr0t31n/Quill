@@ -33,6 +33,24 @@ from typing import Optional
 
 VERSION = Path(__file__).resolve().parent.joinpath("VERSION").read_text().strip()
 
+# ADB proxy cleanup on any exit (SIGTERM from Crucible Kill, normal exit, etc.)
+_ADB_PROXY_ACTIVE = False
+_ADB_BIN: str | None = None
+
+def _adb_proxy_atexit():
+    if _ADB_PROXY_ACTIVE and _ADB_BIN:
+        try:
+            subprocess.run([_ADB_BIN, "shell", "settings", "put", "global",
+                            "http_proxy", ":0"], capture_output=True, timeout=5)
+            subprocess.run([_ADB_BIN, "shell", "settings", "delete", "global",
+                            "http_proxy"], capture_output=True, timeout=5)
+        except Exception:
+            pass
+
+import atexit, signal as _sig
+atexit.register(_adb_proxy_atexit)
+_sig.signal(_sig.SIGTERM, lambda s, f: sys.exit(128 + s))
+
 try:
     if "/opt/pr0t31n/shared" not in sys.path:
         sys.path.insert(0, "/opt/pr0t31n/shared")
@@ -4020,6 +4038,9 @@ def mitm_capture(target_process: str, platform: str, device: str,
                             "http_proxy", f"{host_ip}:{port}"],
                            capture_output=True, timeout=5)
             proxy_configured = True
+            global _ADB_PROXY_ACTIVE, _ADB_BIN
+            _ADB_PROXY_ACTIVE = True
+            _ADB_BIN = adb_bin
             log(f"[mitm] Android proxy configured via adb: {host_ip}:{port}")
         except Exception as exc:
             log(f"[mitm] Could not auto-configure Android proxy: {exc}")
@@ -4387,6 +4408,7 @@ def mitm_capture(target_process: str, platform: str, device: str,
                             "http_proxy", ":0"], capture_output=True, timeout=5)
             subprocess.run([adb_bin, "shell", "settings", "delete", "global",
                             "http_proxy"], capture_output=True, timeout=5)
+            _ADB_PROXY_ACTIVE = False
             log("[mitm] Android proxy cleared and deleted")
         except Exception:
             pass
