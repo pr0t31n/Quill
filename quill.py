@@ -4010,7 +4010,7 @@ def mitm_capture(target_process: str, platform: str, device: str,
         mode = "transparent"
     else:
         mode = "regular"
-    mitm_cmd = [mitmdump_bin, "-w", str(flows_file), "--mode", mode,
+    mitm_cmd = [mitmdump_bin, "-a", str(flows_file), "--mode", mode,
                 "-p", str(port), "--ssl-insecure",
                 "--set", "flow_detail=1",
                 "--set", "stream_large_bodies=5m"]
