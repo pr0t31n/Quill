@@ -4002,6 +4002,8 @@ def mitm_capture(target_process: str, platform: str, device: str,
     _captured_web: list = []
     _emitted_actions: set = set()
 
+    _mitm_scope = os.environ.get("CRUCIBLE_SCOPE", "")
+
     def _emit_action_item(category: str, tool: str, target: str, title: str,
                           desc: str, priority: str = "HIGH", metadata: dict = None):
         key = (tool.lower(), target.lower())
@@ -4017,7 +4019,7 @@ def mitm_capture(target_process: str, platform: str, device: str,
             "priority": priority,
             "approval_tier": "auto",
             "source_tool": "quill",
-            "scope": "ext",
+            "scope": _mitm_scope,
             "metadata": dict(metadata or {}, immediate_queue=True),
         }
         _tok("__CRUCIBLE_ACTION_ITEM__", json.dumps(item))
@@ -5410,6 +5412,7 @@ def _generate_cross_tool_action_items(project_dir: Path) -> None:
         if key in seen:
             return
         seen.add(key)
+        _q_scope = os.environ.get("CRUCIBLE_SCOPE", "")
         item = {
             "id": str(uuid.uuid4()),
             "type": item_type,
@@ -5420,7 +5423,7 @@ def _generate_cross_tool_action_items(project_dir: Path) -> None:
             "description": desc,
             "source_finding": source_finding,
             "priority": priority,
-            "scope": "ext",
+            "scope": _q_scope,
             "status": "pending",
             "datetime": datetime.now(timezone.utc).isoformat(),
             "metadata": metadata or {},
@@ -5438,7 +5441,7 @@ def _generate_cross_tool_action_items(project_dir: Path) -> None:
                 "priority": priority,
                 "approval_tier": "auto",
                 "source_tool": "quill",
-                "scope": "ext",
+                "scope": _q_scope,
                 "metadata": metadata or {},
             }))
 
