@@ -3477,6 +3477,146 @@ if (ObjC.available) {
 """
 
 
+_MITM_AUTH_CAPTURE_ADDON = r'''
+"""mitmdump addon — real-time auth/API/web target capture for Quill auto-queue.
+
+Prints structured tokens to stdout that _drain_mitm() picks up:
+  __QUILL_AUTH__:<json>     — captured auth token / session cookie
+  __QUILL_API__:<json>      — API endpoint detected
+  __QUILL_WEB__:<json>      — web app target detected
+"""
+import json, re, sys
+from mitmproxy import http
+
+_seen_hosts = set()
+_seen_auth = set()
+_seen_api = set()
+_seen_web = set()
+
+_API_CT = ("application/json", "application/graphql", "application/xml",
+           "text/xml", "application/grpc", "application/protobuf")
+_API_PATHS = ("/api/", "/v1/", "/v2/", "/v3/", "/v4/", "/graphql",
+              "/rest/", "/query", "/mutation", "/.well-known/openid",
+              "/oauth", "/token", "/swagger", "/openapi")
+_AUTH_HEADERS = ("authorization", "x-auth-token", "x-api-key",
+                 "x-access-token", "x-csrf-token", "x-session-id")
+_AUTH_COOKIES = ("session", "sid", "token", "jwt", "auth", "access_token",
+                 "refresh_token", "sessionid", "connect.sid", "csrf",
+                 "__session", "ssid")
+
+def _emit(tag, payload):
+    print(f"{tag}:{json.dumps(payload)}", flush=True)
+
+def _is_api(flow):
+    ct = (flow.response.headers.get("content-type", "") or "").lower()
+    path = flow.request.path.lower()
+    if any(api_ct in ct for api_ct in _API_CT):
+        return True
+    if any(p in path for p in _API_PATHS):
+        return True
+    return False
+
+def response(flow: http.HTTPFlow):
+    if not flow.response:
+        return
+    host = flow.request.pretty_host
+    scheme = flow.request.scheme
+    port = flow.request.port
+    base = f"{scheme}://{host}" + (f":{port}" if port not in (80, 443) else "")
+    url = flow.request.url
+
+    # Auth capture — headers
+    for hdr in _AUTH_HEADERS:
+        val = flow.request.headers.get(hdr, "")
+        if val:
+            key = (host, hdr, val[:32])
+            if key not in _seen_auth:
+                _seen_auth.add(key)
+                _emit("__QUILL_AUTH__", {
+                    "host": host, "header": hdr, "value": val[:2048],
+                    "url": url[:512], "method": flow.request.method})
+
+    # Auth capture — cookies
+    cookie_hdr = flow.request.headers.get("cookie", "")
+    if cookie_hdr:
+        for part in cookie_hdr.split(";"):
+            part = part.strip()
+            if "=" not in part:
+                continue
+            cname, _, cval = part.partition("=")
+            cname = cname.strip().lower()
+            if any(ac in cname for ac in _AUTH_COOKIES):
+                key = (host, cname, cval[:32])
+                if key not in _seen_auth:
+                    _seen_auth.add(key)
+                    _emit("__QUILL_AUTH__", {
+                        "host": host, "cookie": cname,
+                        "value": cval[:2048], "url": url[:512],
+                        "method": flow.request.method})
+
+    # Auth capture — response Set-Cookie
+    for sc in flow.response.headers.get_all("set-cookie"):
+        if "=" not in sc:
+            continue
+        cname, _, cval = sc.partition("=")
+        cname = cname.strip().lower()
+        cval = cval.split(";")[0].strip()
+        if any(ac in cname for ac in _AUTH_COOKIES):
+            key = (host, "set-" + cname, cval[:32])
+            if key not in _seen_auth:
+                _seen_auth.add(key)
+                _emit("__QUILL_AUTH__", {
+                    "host": host, "set_cookie": cname,
+                    "value": cval[:2048], "url": url[:512]})
+
+    # Auth capture — JSON body tokens
+    ct = (flow.response.headers.get("content-type", "") or "").lower()
+    if "json" in ct and flow.response.content:
+        try:
+            body = json.loads(flow.response.content[:65536])
+            if isinstance(body, dict):
+                for tk in ("access_token", "token", "id_token",
+                           "refresh_token", "jwt", "session_token",
+                           "auth_token", "accessToken", "idToken"):
+                    if tk in body and isinstance(body[tk], str) and len(body[tk]) > 8:
+                        key = (host, tk, body[tk][:32])
+                        if key not in _seen_auth:
+                            _seen_auth.add(key)
+                            _emit("__QUILL_AUTH__", {
+                                "host": host, "json_field": tk,
+                                "value": body[tk][:2048],
+                                "url": url[:512]})
+        except Exception:
+            pass
+
+    # API vs Web classification
+    if _is_api(flow):
+        if host not in _seen_api:
+            _seen_api.add(host)
+            path = flow.request.path
+            api_base = base
+            for prefix in ("/api/", "/v1/", "/v2/", "/v3/", "/rest/"):
+                idx = path.lower().find(prefix)
+                if idx >= 0:
+                    api_base = base + path[:idx + len(prefix)]
+                    break
+            _emit("__QUILL_API__", {
+                "host": host, "base_url": api_base,
+                "sample_url": url[:512],
+                "method": flow.request.method,
+                "content_type": ct[:128]})
+    else:
+        if host not in _seen_web and flow.response.status_code and flow.response.status_code < 400:
+            html_ct = "text/html" in ct
+            if html_ct:
+                _seen_web.add(host)
+                _emit("__QUILL_WEB__", {
+                    "host": host, "base_url": base,
+                    "sample_url": url[:512],
+                    "status": flow.response.status_code})
+'''
+
+
 def dynamic_analysis(target: str, platform: str, device: str, output_dir: Path) -> None:
     _check_pause()
     _save_checkpoint()
@@ -3847,18 +3987,110 @@ def mitm_capture(target_process: str, platform: str, device: str,
                 "--set", "stream_large_bodies=5m"]
     _confdir = _custom_confdir or _PERSISTENT_CA_DIR
     mitm_cmd.extend(["--set", f"confdir={_confdir}"])
+    addon_file = mitm_dir / "_auth_capture.py"
+    addon_file.write_text(_MITM_AUTH_CAPTURE_ADDON, encoding="utf-8")
+    mitm_cmd.extend(["-s", str(addon_file)])
+    log("[mitm] Auth/API capture addon loaded")
     log(f"[mitm] Launching mitmdump: {' '.join(mitm_cmd)}")
     mitm_started = datetime.now(timezone.utc)
     mitm_proc = subprocess.Popen(mitm_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     import threading as _thr_mod
     _mitm_lines = []
+    _captured_auth: list = []
+    _captured_api: list = []
+    _captured_web: list = []
+    _emitted_actions: set = set()
+
+    def _emit_action_item(category: str, tool: str, target: str, title: str,
+                          desc: str, priority: str = "HIGH", metadata: dict = None):
+        key = (tool.lower(), target.lower())
+        if key in _emitted_actions:
+            return
+        _emitted_actions.add(key)
+        item = {
+            "category": category,
+            "recommended_tool": tool,
+            "target": target,
+            "title": title,
+            "description": desc,
+            "priority": priority,
+            "approval_tier": "auto",
+            "source_tool": "quill",
+            "scope": "ext",
+            "metadata": dict(metadata or {}, immediate_queue=True),
+        }
+        _tok("__CRUCIBLE_ACTION_ITEM__", json.dumps(item))
+        log(f"[mitm] Action item emitted: {tool} → {target}")
+
     def _drain_mitm(stream, label):
         try:
             for raw in iter(stream.readline, b""):
                 line = raw.decode("utf-8", errors="replace").rstrip()
-                if line:
-                    _mitm_lines.append(line)
+                if not line:
+                    continue
+                _mitm_lines.append(line)
+                if line.startswith("__QUILL_AUTH__:"):
+                    try:
+                        payload = json.loads(line[len("__QUILL_AUTH__:"):])
+                        _captured_auth.append(payload)
+                        host = payload.get("host", "")
+                        auth_type = payload.get("header") or payload.get("cookie") or payload.get("json_field") or payload.get("set_cookie") or "unknown"
+                        log(f"[mitm] Auth captured: {auth_type} from {host}")
+                    except Exception:
+                        pass
+                elif line.startswith("__QUILL_API__:"):
+                    try:
+                        payload = json.loads(line[len("__QUILL_API__:"):])
+                        _captured_api.append(payload)
+                        host = payload.get("host", "")
+                        base = payload.get("base_url", "")
+                        log(f"[mitm] API target detected: {host}")
+                        auth_meta = {}
+                        for a in _captured_auth:
+                            if a.get("host") == host:
+                                if a.get("header"):
+                                    auth_meta["auth_header"] = a["header"]
+                                    auth_meta["auth_value"] = a.get("value", "")
+                                elif a.get("cookie"):
+                                    auth_meta.setdefault("auth_cookies", {})[a["cookie"]] = a.get("value", "")
+                                elif a.get("json_field"):
+                                    auth_meta["auth_token_field"] = a["json_field"]
+                                    auth_meta["auth_token_value"] = a.get("value", "")
+                                break
+                        _emit_action_item(
+                            "api_discovered", "siphon", base,
+                            f"API endpoint from MITM capture: {host}",
+                            f"Quill MITM captured live API traffic to {host}. "
+                            f"Siphon can test this API for OWASP API Top 10 vulnerabilities.",
+                            priority="HIGH", metadata=auth_meta)
+                    except Exception:
+                        pass
+                elif line.startswith("__QUILL_WEB__:"):
+                    try:
+                        payload = json.loads(line[len("__QUILL_WEB__:"):])
+                        _captured_web.append(payload)
+                        host = payload.get("host", "")
+                        base = payload.get("base_url", "")
+                        log(f"[mitm] Web target detected: {host}")
+                        auth_meta = {}
+                        for a in _captured_auth:
+                            if a.get("host") == host:
+                                if a.get("cookie"):
+                                    auth_meta.setdefault("auth_cookies", {})[a["cookie"]] = a.get("value", "")
+                                elif a.get("header"):
+                                    auth_meta["auth_header"] = a["header"]
+                                    auth_meta["auth_value"] = a.get("value", "")
+                                break
+                        _emit_action_item(
+                            "webapp_discovered", "fracture", base,
+                            f"Web target from MITM capture: {host}",
+                            f"Quill MITM captured live web traffic to {host}. "
+                            f"Fracture can test this web app for OWASP Top 10 vulnerabilities.",
+                            priority="HIGH", metadata=auth_meta)
+                    except Exception:
+                        pass
+                else:
                     log(f"[mitm] [{label}] {line}")
         except Exception:
             pass
@@ -5178,7 +5410,7 @@ def _generate_cross_tool_action_items(project_dir: Path) -> None:
         if key in seen:
             return
         seen.add(key)
-        items.append({
+        item = {
             "id": str(uuid.uuid4()),
             "type": item_type,
             "recommended_tool": tool,
@@ -5192,7 +5424,23 @@ def _generate_cross_tool_action_items(project_dir: Path) -> None:
             "status": "pending",
             "datetime": datetime.now(timezone.utc).isoformat(),
             "metadata": metadata or {},
-        })
+        }
+        items.append(item)
+        if _MANAGED:
+            cat_map = {"api": "api_discovered", "web_app": "webapp_discovered",
+                       "cloud_audit": "other", "file_analysis": "other"}
+            _tok("__CRUCIBLE_ACTION_ITEM__", json.dumps({
+                "category": cat_map.get(item_type, "other"),
+                "recommended_tool": tool.lower(),
+                "target": target,
+                "title": title,
+                "description": desc,
+                "priority": priority,
+                "approval_tier": "auto",
+                "source_tool": "quill",
+                "scope": "ext",
+                "metadata": metadata or {},
+            }))
 
     _api_urls: set = set()
     _webview_urls: set = set()
