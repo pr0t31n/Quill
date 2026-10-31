@@ -68,6 +68,18 @@ except ImportError:
 _MANAGED = os.environ.get("CRUCIBLE_MANAGED", "") == "1"
 _findings: list = []
 
+_fdb = None
+_db_path = os.environ.get("PR0T31N_FINDINGS_DB")
+if _db_path:
+    try:
+        import sys as _s
+        if "/opt/pr0t31n/shared" not in _s.path:
+            _s.path.insert(0, "/opt/pr0t31n/shared")
+        import pr0t31n_findings_db
+        _fdb = pr0t31n_findings_db.FindingsDB(_db_path)
+    except Exception:
+        _fdb = None
+
 _RUN_DIR: Optional[Path] = None
 _RUNLOG = None
 _pause = None
@@ -213,6 +225,11 @@ def finding(*, title: str, severity: str, description: str,
             "data": data or {},
         }
     _findings.append(rec)
+    if _fdb:
+        try:
+            _fdb.insert_finding(rec)
+        except Exception:
+            pass
     log(f"[finding] #{len(_findings)} [{severity.upper()}] {title}")
     _tok("__CRUCIBLE_FINDING__", json.dumps(rec))
     _flush_findings()
