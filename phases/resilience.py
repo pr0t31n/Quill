@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FuturesTimeout
 from pathlib import Path
 from typing import Optional
 
 from phases.base import GateType, Phase, PhaseResult, UserGate
+
+FRIDA_OP_TIMEOUT = 30
 
 
 class ResiliencePhase(Phase):
@@ -36,6 +39,18 @@ class ResiliencePhase(Phase):
     @property
     def requires_frida(self) -> bool:
         return True
+
+    def _frida_with_timeout(self, fn, label: str, timeout: int = FRIDA_OP_TIMEOUT):
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(fn)
+            try:
+                return future.result(timeout=timeout)
+            except _FuturesTimeout:
+                self.err(f"[resilience] Frida operation timed out after {timeout}s: {label}")
+                return None
+            except Exception as exc:
+                self.err(f"[resilience] Frida operation failed ({label}): {exc}")
+                return None
 
     def pre_gates(self) -> list[UserGate]:
         return [UserGate(
@@ -158,21 +173,31 @@ class ResiliencePhase(Phase):
 
         try:
             import frida
-            device = frida.get_usb_device(timeout=5)
-            pid = device.spawn([self.package])
-            session = device.attach(pid)
-            script = session.create_script(root_bypass_script)
 
-            bypass_log = []
+            def _do_root_bypass():
+                device = frida.get_usb_device(timeout=5)
+                pid = device.spawn([self.package])
+                session = device.attach(pid)
+                script = session.create_script(root_bypass_script)
 
-            def on_message(message, data):
-                if message.get("type") == "send":
-                    bypass_log.append(message.get("payload", ""))
+                bypass_log = []
 
-            script.on("message", on_message)
-            script.load()
-            device.resume(pid)
-            time.sleep(5)
+                def on_message(message, data):
+                    if message.get("type") == "send":
+                        bypass_log.append(message.get("payload", ""))
+
+                script.on("message", on_message)
+                script.load()
+                device.resume(pid)
+                time.sleep(5)
+                session.detach()
+                return bypass_log
+
+            bypass_log = self._frida_with_timeout(_do_root_bypass, "root detection bypass")
+
+            if bypass_log is None:
+                ev_data["frida_bypass_error"] = "timeout"
+                return findings
 
             app_running = self._device.is_app_running(self.package)
 
@@ -198,8 +223,6 @@ class ResiliencePhase(Phase):
                     affected=self.package,
                 )
                 findings += 1
-
-            session.detach()
         except ImportError:
             self.err("[resilience] frida Python module not available")
         except Exception as exc:
@@ -219,33 +242,45 @@ class ResiliencePhase(Phase):
 
         try:
             import frida
-            device = frida.get_usb_device(timeout=5)
 
             if not self._device.is_app_running(self.package):
                 self._device.launch_app(self.package)
                 time.sleep(3)
 
-            pid = device.get_process(self.package).pid
-            session = device.attach(pid)
+            def _do_ssl_pinning():
+                device = frida.get_usb_device(timeout=5)
+                pid = device.get_process(self.package).pid
+                session = device.attach(pid)
 
-            hook_log = []
-            pin_detected = False
+                hook_log = []
+                pin_detected = False
+
+                if ssl_bypass_script:
+                    script = session.create_script(ssl_bypass_script)
+
+                    def on_message(message, data):
+                        nonlocal pin_detected
+                        if message.get("type") == "send":
+                            payload = message.get("payload", "")
+                            hook_log.append(payload)
+                            if "pinning" in str(payload).lower() or "certificate" in str(payload).lower():
+                                pin_detected = True
+
+                    script.on("message", on_message)
+                    script.load()
+                    time.sleep(8)
+
+                session.detach()
+                return hook_log, pin_detected
+
+            result = self._frida_with_timeout(_do_ssl_pinning, "SSL pinning test")
+
+            if result is None:
+                return findings
+
+            hook_log, pin_detected = result
 
             if ssl_bypass_script:
-                script = session.create_script(ssl_bypass_script)
-
-                def on_message(message, data):
-                    nonlocal pin_detected
-                    if message.get("type") == "send":
-                        payload = message.get("payload", "")
-                        hook_log.append(payload)
-                        if "pinning" in str(payload).lower() or "certificate" in str(payload).lower():
-                            pin_detected = True
-
-                script.on("message", on_message)
-                script.load()
-                time.sleep(8)
-
                 (out_dir / "ssl_pinning_hooks.json").write_text(
                     json.dumps(hook_log, indent=2), encoding="utf-8")
 
@@ -280,8 +315,6 @@ class ResiliencePhase(Phase):
                         affected=self.package,
                     )
                     findings += 1
-
-            session.detach()
         except ImportError:
             self.err("[resilience] frida Python module not available")
         except Exception as exc:
@@ -312,12 +345,10 @@ class ResiliencePhase(Phase):
 
         try:
             import frida
-            device = frida.get_usb_device(timeout=5)
+
             if not self._device.is_app_running(self.package):
                 self._device.launch_app(self.package)
                 time.sleep(3)
-            pid = device.get_process(self.package).pid
-            session = device.attach(pid)
 
             if self.platform == "android":
                 debug_script = """
@@ -334,20 +365,31 @@ class ResiliencePhase(Phase):
                 send({sysctl_found: sysctl !== null});
                 """
 
-            script = session.create_script(debug_script)
-            debug_results = []
+            def _do_debugger_test():
+                device = frida.get_usb_device(timeout=5)
+                pid = device.get_process(self.package).pid
+                session = device.attach(pid)
+                script = session.create_script(debug_script)
+                debug_results = []
 
-            def on_msg(msg, data):
-                if msg.get("type") == "send":
-                    debug_results.append(msg.get("payload", {}))
+                def on_msg(msg, data):
+                    if msg.get("type") == "send":
+                        debug_results.append(msg.get("payload", {}))
 
-            script.on("message", on_msg)
-            script.load()
-            time.sleep(2)
+                script.on("message", on_msg)
+                script.load()
+                time.sleep(2)
+                session.detach()
+                return debug_results
 
-            ev_data["frida_attach_succeeded"] = True
-            ev_data["debug_results"] = debug_results
-            session.detach()
+            result = self._frida_with_timeout(_do_debugger_test, "debugger detection")
+
+            if result is not None:
+                ev_data["frida_attach_succeeded"] = True
+                ev_data["debug_results"] = result
+            else:
+                ev_data["frida_attach_succeeded"] = False
+                ev_data["frida_attach_error"] = "timeout"
         except ImportError:
             ev_data["frida_available"] = False
         except Exception as exc:
@@ -486,9 +528,6 @@ class ResiliencePhase(Phase):
             ev_data["platform"] = "ios"
             try:
                 import frida
-                device = frida.get_usb_device(timeout=5)
-                pid = device.get_process(self.package).pid
-                session = device.attach(pid)
 
                 ios_script = """
                 ObjC.perform(function() {
@@ -504,18 +543,29 @@ class ResiliencePhase(Phase):
                     send({secure_window: secureFound});
                 });
                 """
-                script = session.create_script(ios_script)
-                results = []
 
-                def on_msg(msg, data):
-                    if msg.get("type") == "send":
-                        results.append(msg.get("payload", {}))
+                def _do_screenshot_ios():
+                    device = frida.get_usb_device(timeout=5)
+                    pid = device.get_process(self.package).pid
+                    session = device.attach(pid)
+                    script = session.create_script(ios_script)
+                    results = []
 
-                script.on("message", on_msg)
-                script.load()
-                time.sleep(2)
-                ev_data["frida_results"] = results
-                session.detach()
+                    def on_msg(msg, data):
+                        if msg.get("type") == "send":
+                            results.append(msg.get("payload", {}))
+
+                    script.on("message", on_msg)
+                    script.load()
+                    time.sleep(2)
+                    session.detach()
+                    return results
+
+                result = self._frida_with_timeout(_do_screenshot_ios, "iOS screenshot prevention")
+                if result is not None:
+                    ev_data["frida_results"] = result
+                else:
+                    ev_data["frida_error"] = "timeout"
             except Exception as exc:
                 ev_data["frida_error"] = str(exc)
 
@@ -585,12 +635,10 @@ class ResiliencePhase(Phase):
 
             try:
                 import frida
-                device = frida.get_usb_device(timeout=5)
+
                 if not self._device.is_app_running(self.package):
                     self._device.launch_app(self.package)
                     time.sleep(3)
-                pid = device.get_process(self.package).pid
-                session = device.attach(pid)
 
                 tamper_script = """
                 Java.perform(function() {
@@ -607,40 +655,49 @@ class ResiliencePhase(Phase):
                     send({integrity_classes: found});
                 });
                 """
-                script = session.create_script(tamper_script)
-                integrity_results = []
 
-                def on_msg(msg, data):
-                    if msg.get("type") == "send":
-                        integrity_results.append(msg.get("payload", {}))
+                def _do_integrity_check():
+                    device = frida.get_usb_device(timeout=5)
+                    pid = device.get_process(self.package).pid
+                    session = device.attach(pid)
+                    script = session.create_script(tamper_script)
+                    integrity_results = []
 
-                script.on("message", on_msg)
-                script.load()
-                time.sleep(3)
-                ev_data["integrity_results"] = integrity_results
-                session.detach()
+                    def on_msg(msg, data):
+                        if msg.get("type") == "send":
+                            integrity_results.append(msg.get("payload", {}))
 
-                has_integrity = any(
-                    r.get("integrity_classes")
-                    for r in integrity_results
-                    if isinstance(r, dict)
-                )
-                if not has_integrity:
-                    self.finding(
-                        title="No Code Integrity / Anti-Tampering",
-                        severity="LOW",
-                        description=(
-                            "No runtime integrity verification was detected. "
-                            "The app does not appear to use SafetyNet, Play "
-                            "Integrity API, or custom tamper-detection. A "
-                            "repackaged or modified APK will run without "
-                            "restriction."
-                        ),
-                        catalogue_id="QUILL-RES-009",
-                        output_file=str((out_dir / "code_integrity.json").relative_to(self._output_dir)),
-                        affected=self.package,
+                    script.on("message", on_msg)
+                    script.load()
+                    time.sleep(3)
+                    session.detach()
+                    return integrity_results
+
+                integrity_results = self._frida_with_timeout(_do_integrity_check, "code integrity check")
+
+                if integrity_results is not None:
+                    ev_data["integrity_results"] = integrity_results
+                    has_integrity = any(
+                        r.get("integrity_classes")
+                        for r in integrity_results
+                        if isinstance(r, dict)
                     )
-                    findings += 1
+                    if not has_integrity:
+                        self.finding(
+                            title="No Code Integrity / Anti-Tampering",
+                            severity="LOW",
+                            description=(
+                                "No runtime integrity verification was detected. "
+                                "The app does not appear to use SafetyNet, Play "
+                                "Integrity API, or custom tamper-detection. A "
+                                "repackaged or modified APK will run without "
+                                "restriction."
+                            ),
+                            catalogue_id="QUILL-RES-009",
+                            output_file=str((out_dir / "code_integrity.json").relative_to(self._output_dir)),
+                            affected=self.package,
+                        )
+                        findings += 1
 
             except ImportError:
                 self.err("[resilience] frida Python module not available")
