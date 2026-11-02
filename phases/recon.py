@@ -182,6 +182,7 @@ class ReconPhase(Phase):
                     catalogue_id="QUILL-REC-001",
                     affected=pkg,
                     output_file=f"recon/manifest_flags.json",
+                    category="Build Configuration",
                 )
                 findings += 1
 
@@ -196,6 +197,7 @@ class ReconPhase(Phase):
                     catalogue_id="QUILL-REC-002",
                     affected=pkg,
                     output_file=f"recon/manifest_flags.json",
+                    category="Build Configuration",
                 )
                 findings += 1
 
@@ -209,6 +211,7 @@ class ReconPhase(Phase):
                     catalogue_id="QUILL-REC-003",
                     affected=pkg,
                     output_file=f"recon/manifest_flags.json",
+                    category="Transport Security",
                 )
                 findings += 1
 
@@ -238,6 +241,7 @@ class ReconPhase(Phase):
                     catalogue_id="QUILL-REC-004",
                     affected=", ".join(c["name"].split(".")[-1] for c in unprotected[:5]),
                     output_file="recon/exported_components.json",
+                    category="Android Components",
                 )
                 findings += 1
 
@@ -322,6 +326,7 @@ class ReconPhase(Phase):
                 catalogue_id="QUILL-REC-010",
                 affected=bundle_id,
                 output_file="recon/ats_config.json",
+                category="Transport Security",
             )
             findings += 1
 
@@ -461,6 +466,7 @@ class ReconPhase(Phase):
                     catalogue_id="QUILL-REC-006",
                     affected=pkg,
                     output_file="recon/network_security_config.xml",
+                    category="Transport Security",
                 )
                 findings += 1
 
@@ -482,6 +488,7 @@ class ReconPhase(Phase):
                             catalogue_id="QUILL-REC-007",
                             affected=", ".join(domains),
                             output_file="recon/network_security_config.xml",
+                            category="Transport Security",
                         )
                         findings += 1
 
@@ -606,6 +613,7 @@ class ReconPhase(Phase):
                 catalogue_id="QUILL-REC-009",
                 affected=", ".join(trackers),
                 output_file="recon/trackers.json",
+                category="Privacy",
             )
             return 1
         return 0

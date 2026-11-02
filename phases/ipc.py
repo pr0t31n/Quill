@@ -172,6 +172,7 @@ class IPCPhase(Phase):
                 catalogue_id="QUILL-IPC-001",
                 output_file=str(ev_file.relative_to(self._output_dir)),
                 affected=", ".join(a.split(".")[-1] for a in unprotected_activities[:5]),
+                category="Android Components",
             )
             findings += 1
 
@@ -190,6 +191,7 @@ class IPCPhase(Phase):
                 catalogue_id="QUILL-IPC-002",
                 output_file=str(ev_file.relative_to(self._output_dir)),
                 affected=", ".join(s.split(".")[-1] for s in unprotected_services[:5]),
+                category="Android Components",
             )
             findings += 1
 
@@ -329,6 +331,7 @@ class IPCPhase(Phase):
                 output_file=str(ev_file.relative_to(self._output_dir)),
                 affected=", ".join(i["receiver"].split(".")[-1]
                                    for i in injectable[:5]),
+                category="Android Components",
             )
             findings += 1
 
@@ -395,6 +398,7 @@ class IPCPhase(Phase):
                 catalogue_id="QUILL-IPC-006",
                 output_file=str(ev_file.relative_to(self._output_dir)),
                 affected=", ".join(h["scheme"] for h in hijackable[:5]),
+                category="Deep Links",
             )
             findings += 1
 
@@ -412,6 +416,7 @@ class IPCPhase(Phase):
                 catalogue_id="QUILL-IPC-007",
                 output_file=str(ev_file.relative_to(self._output_dir)),
                 affected="deep link handlers",
+                category="Deep Links",
             )
             findings += 1
 
@@ -485,6 +490,7 @@ class IPCPhase(Phase):
                 catalogue_id="QUILL-IPC-008",
                 output_file=str(ev_file.relative_to(self._output_dir)),
                 affected=", ".join(t["scheme"] for t in tested[:5]),
+                category="Deep Links",
             )
             findings += 1
 
@@ -533,6 +539,7 @@ class IPCPhase(Phase):
                 catalogue_id="QUILL-IPC-009",
                 output_file=str(ev_file.relative_to(self._output_dir)),
                 affected=self.package,
+                category="Sensitive Data Exposure",
             )
             findings += 1
 

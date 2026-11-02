@@ -201,7 +201,7 @@ def _clean_affected(val: str) -> str:
 
 def finding(*, title: str, severity: str, description: str,
              data: dict | None = None, output_file: str = "",
-             output: str = "") -> None:
+             output: str = "", category: str = "") -> None:
     of_rel = ""
     if output_file:
         parts = [output_file]
@@ -235,6 +235,8 @@ def finding(*, title: str, severity: str, description: str,
             "output_file": of_rel,
             "data": data or {},
         }
+    if category:
+        rec["category"] = category
     if _CURRENT_ROLES:
         rec["roles"] = _CURRENT_ROLES
     _findings.append(rec)
@@ -385,6 +387,7 @@ def analyse_info_plist(app_dir: Path, output_dir: Path) -> dict:
         log("[info_plist] ATS: No NSPinnedDomains — no ATS-level certificate pinning configured")
         finding(title="Certificate pinning not configured in App Transport Security",
                 severity="MEDIUM",
+                category="Transport Security",
                 description=("The Info.plist NSAppTransportSecurity dictionary does not contain "
                              "NSPinnedDomains. Without certificate pinning, the application "
                              "relies solely on the device trust store for TLS validation, "
@@ -772,7 +775,8 @@ def analyse_manifest(app_dir: Path, output_dir: Path) -> dict:
                      data={"catalogue_id": "QUILL-APK-001", "affected": package,
                            "remediation": "Set android:debuggable=false in release builds."},
                      output=f"AndroidManifest.xml: <application android:debuggable=\"true\" ...>",
-                     output_file=str(out_file))
+                     output_file=str(out_file),
+                     category="Build Configuration")
 
         if allow_backup:
             backup_explicit = _attr(app_el, "allowBackup")
@@ -784,7 +788,8 @@ def analyse_manifest(app_dir: Path, output_dir: Path) -> dict:
                      data={"catalogue_id": "QUILL-APK-002", "affected": package,
                            "remediation": "Set android:allowBackup=false or implement a BackupAgent with encryption."},
                      output=f"AndroidManifest.xml: <application {backup_src} ...>",
-                     output_file=str(out_file))
+                     output_file=str(out_file),
+                     category="Build Configuration")
 
         if use_cleartext:
             log("[manifest] usesCleartextTraffic=true — finding emitted")
@@ -794,7 +799,8 @@ def analyse_manifest(app_dir: Path, output_dir: Path) -> dict:
                      data={"catalogue_id": "QUILL-APK-003", "affected": package,
                            "remediation": "Set usesCleartextTraffic=false and use a network security config for exceptions."},
                      output=f"AndroidManifest.xml: <application android:usesCleartextTraffic=\"true\" ...>",
-                     output_file=str(out_file))
+                     output_file=str(out_file),
+                     category="Transport Security")
 
         defined_perms = set()
         for pdef in root.findall("permission"):
@@ -920,17 +926,19 @@ def analyse_permissions(app_dir: Path, output_dir: Path, manifest_data: dict) ->
                  data={"catalogue_id": "QUILL-APK-030", "affected": package,
                        "remediation": "Review and remove unnecessary dangerous permissions."},
                  output=f"AndroidManifest.xml dangerous permissions:\n{perm_list_str}",
-                 output_file=str(out_file))
+                 output_file=str(out_file),
+                 category="Android Permissions")
 
     log(f"[permissions] Emitting individual findings for {len(dangerous)} dangerous permission(s)")
     for perm in dangerous:
         short = perm.rsplit(".", 1)[-1]
-        finding(title=f"Dangerous permission: {short}",
+        finding(title=f"Dangerous Permission: {short}",
                  severity="INFO",
                  description=f"The app requests {perm}, classified as a dangerous (runtime) permission by Android.",
                  data={"catalogue_id": "QUILL-APK-031", "affected": f"{package} / {short}"},
                  output=f"AndroidManifest.xml: <uses-permission android:name=\"{perm}\" />",
-                 output_file=str(out_file))
+                 output_file=str(out_file),
+                 category="Android Permissions")
 
     log("[permissions] Permission analysis complete")
     status("permissions", "Permission analysis", "complete")
@@ -1670,7 +1678,8 @@ def analyse_ios_runtime_protections(app_dir: Path, output_dir: Path) -> None:
                 output="Jailbreak detection indicators searched:\n"
                        "  IOSSecuritySuite, isJailbroken, Cydia.app, MobileSubstrate,\n"
                        "  DTTJailbreakDetection, /bin/bash, /usr/bin/ssh, canOpenURL cydia://\n"
-                       "Result: NONE FOUND")
+                       "Result: NONE FOUND",
+                category="Application Hardening")
     else:
         jb_str = ", ".join(jb_found[:5])
         log(f"[ios_rprot] Jailbreak detection found: {jb_str}")
@@ -1699,7 +1708,8 @@ def analyse_ios_runtime_protections(app_dir: Path, output_dir: Path) -> None:
                 output="Certificate pinning indicators searched in binary:\n"
                        "  TrustKit, AFSecurityPolicy, SecTrustSetAnchorCertificates,\n"
                        "  CertificatePinner, URLSessionPinningDelegate, Alamofire ServerTrustManager\n"
-                       "Result: NONE FOUND")
+                       "Result: NONE FOUND",
+                category="Transport Security")
     else:
         pin_str = ", ".join(pin_found[:5])
         log(f"[ios_rprot] Code-level pinning found: {pin_str}")
@@ -1734,6 +1744,7 @@ def analyse_network_security_config(app_dir: Path, output_dir: Path) -> None:
         log("[nsc] No network_security_config.xml found — no NSC-level certificate pinning")
         finding(title="Certificate pinning not configured in network security config",
                 severity="MEDIUM",
+                category="Transport Security",
                 description=("No network_security_config.xml was found in the APK. Without a "
                              "network security configuration, the application has no certificate "
                              "pinning via the Android NSC mechanism, relying solely on the device "
@@ -1838,6 +1849,7 @@ def analyse_network_security_config(app_dir: Path, output_dir: Path) -> None:
         result["findings"].append("no_pin_set")
         finding(title="Certificate pinning not configured in network security config",
                 severity="MEDIUM",
+                category="Transport Security",
                 description=("The network_security_config.xml does not contain any <pin-set> "
                              "elements. Without certificate pinning, the application relies solely "
                              "on the device trust store for TLS validation, allowing man-in-the-middle "
@@ -2230,7 +2242,8 @@ def analyse_runtime_protections(app_dir: Path, output_dir: Path) -> None:
                        "  Smali packages: " + ", ".join(p for p, _ in _ROOT_DETECT_INDICATORS) + "\n"
                        "  Code patterns: RootBeer, SafetyNet, Play Integrity, su binary paths, "
                        "test-keys, ro.debuggable\n"
-                       "Result: NONE FOUND")
+                       "Result: NONE FOUND",
+                category="Application Hardening")
     else:
         indicators_str = ", ".join(found_indicators)
         log(f"[rprot] Root detection mechanisms found: {indicators_str}")
@@ -2347,7 +2360,8 @@ def detect_trackers(app_dir: Path, output_dir: Path) -> None:
                 data={"catalogue_id": "QUILL-APK-120",
                       "affected": t["package"]},
                 output=f"Detection: smali package '{t['package']}' found in APK ({t.get('method', 'smali_dir')})",
-                output_file=str(out_file))
+                output_file=str(out_file),
+                category="Privacy")
 
     if len(found_trackers) > 5:
         names = ", ".join(t["name"] for t in found_trackers)
@@ -2360,6 +2374,7 @@ def detect_trackers(app_dir: Path, output_dir: Path) -> None:
                       "affected": names,
                       "remediation": "Review tracker necessity. Remove unused SDKs and "
                                      "consolidate analytics to reduce third-party exposure."},
+                category="Privacy",
                 output_file=str(out_file))
 
     log(f"[trackers] Tracker SDK detection complete — {len(found_trackers)} tracker(s) found")
@@ -2462,7 +2477,8 @@ def detect_trackers_ios(app_dir: Path, output_dir: Path) -> None:
                 data={"catalogue_id": "QUILL-IOS-060",
                       "affected": t.get("package", t["name"])},
                 output=f"Detection: '{t.get('package', t['name'])}' found via {det_method}",
-                output_file=str(out_file))
+                output_file=str(out_file),
+                category="Privacy")
 
     if len(found) > 5:
         names = ", ".join(t["name"] for t in found)
@@ -2472,7 +2488,8 @@ def detect_trackers_ios(app_dir: Path, output_dir: Path) -> None:
                              f"Each SDK increases attack surface and privacy impact."),
                 data={"catalogue_id": "QUILL-IOS-061", "affected": names,
                       "remediation": "Review tracker necessity. Remove unused SDKs."},
-                output_file=str(out_file))
+                output_file=str(out_file),
+                category="Privacy")
 
     log(f"[trackers_ios] iOS tracker detection complete — {len(found)} tracker(s)")
     status("trackers_ios", "iOS tracker SDK detection", "complete")
@@ -2591,6 +2608,7 @@ def analyse_apkid(app_dir: Path, output_dir: Path) -> None:
         log(f"[apkid] Anti-debug mechanisms detected: {sigs}")
         finding(title=f"Anti-debug mechanism detected ({len(result['anti_debug'])} indicator(s))",
                 severity="INFO",
+                category="Application Hardening",
                 description=(f"The application contains anti-debugging indicators: {sigs}. "
                              f"This is a positive security control that makes dynamic analysis "
                              f"and tampering more difficult."),
@@ -2603,6 +2621,7 @@ def analyse_apkid(app_dir: Path, output_dir: Path) -> None:
         log(f"[apkid] Anti-emulator detection found: {sigs}")
         finding(title=f"Anti-emulator detection found ({len(result['anti_vm'])} indicator(s))",
                 severity="INFO",
+                category="Application Hardening",
                 description=(f"The application checks for emulator/VM environment: {sigs}. "
                              f"This is a positive security control that hinders automated "
                              f"analysis in emulated environments."),
@@ -2633,6 +2652,7 @@ def analyse_apkid(app_dir: Path, output_dir: Path) -> None:
                       "remediation": "Apply ProGuard/R8 at minimum. Consider DexGuard or "
                                      "similar commercial protectors for high-value apps."},
                 output=f"Analysis method: {result['method']}\nNo anti-debug, anti-VM, or packer indicators found",
+                category="Application Hardening",
                 output_file=str(out_file))
 
     log(f"[apkid] APKiD / packer detection complete — method={result['method']}")
@@ -2719,6 +2739,7 @@ def detect_firebase(app_dir: Path, output_dir: Path) -> None:
         ctx = "\n".join(ctx_lines) if ctx_lines else url
         finding(title=f"Firebase Realtime Database URL detected",
                 severity="MEDIUM",
+                category="Information Disclosure",
                 description=(f"The application references a Firebase Realtime Database: {url}. "
                              f"If database rules allow unauthenticated reads, anyone can "
                              f"access the data by appending .json to the URL."),
@@ -2742,7 +2763,8 @@ def detect_firebase(app_dir: Path, output_dir: Path) -> None:
                       "remediation": "Review Firebase Storage security rules. "
                                      "Require authentication for all read/write operations."},
                 output=f"Source reference:\n{ctx}",
-                output_file=str(out_file))
+                output_file=str(out_file),
+                category="Information Disclosure")
 
     if result["google_services"]:
         pid = result["google_services"].get("project_id", "(unknown)")
@@ -2756,7 +2778,8 @@ def detect_firebase(app_dir: Path, output_dir: Path) -> None:
                 data={"catalogue_id": "QUILL-APK-132",
                       "affected": pid},
                 output=f"google-services.json excerpt:\n{gs_excerpt}",
-                output_file=str(out_file))
+                output_file=str(out_file),
+                category="Information Disclosure")
 
     if has_remote_config:
         log("[firebase] Firebase Remote Config usage detected")
@@ -2765,6 +2788,7 @@ def detect_firebase(app_dir: Path, output_dir: Path) -> None:
         rc_ctx = "\n".join(rc_lines) if rc_lines else "Firebase Remote Config references detected in application"
         finding(title="Firebase Remote Config in use",
                 severity="INFO",
+                category="Information Disclosure",
                 description=("The application uses Firebase Remote Config, which fetches "
                              "configuration values from Google's servers at runtime. "
                              "Ensure the config does not control security-sensitive "
@@ -2933,7 +2957,8 @@ def analyse_signing(apk_path: Path, app_dir: Path, output_dir: Path) -> None:
                       "affected": str(apk_path),
                       "cves": "CVE-2017-13156",
                       "remediation": "Sign with v2 (or v3) APK Signature Scheme in addition to v1."},
-                output_file=str(out_file))
+                output_file=str(out_file),
+                category="Code Signing")
     elif result["v1"] and (result["v2"] or result["v3"]):
         schemes = "v1"
         if result["v2"]: schemes += "+v2"
@@ -2953,7 +2978,8 @@ def analyse_signing(apk_path: Path, app_dir: Path, output_dir: Path) -> None:
                                      "to API 24+ where v2 verification is enforced."},
                 output=f"Signing schemes detected: {schemes}\nv1 (JAR): {result['v1']}\n"
                        f"v2 (APK Signature Scheme): {result['v2']}\nv3 (rotation): {result['v3']}",
-                output_file=str(out_file))
+                output_file=str(out_file),
+                category="Code Signing")
 
     weak_algos = []
     for algo in ("SHA1withRSA", "MD5withRSA", "SHA1withDSA", "MD5withDSA"):
@@ -2981,7 +3007,8 @@ def analyse_signing(apk_path: Path, app_dir: Path, output_dir: Path) -> None:
                 data={"catalogue_id": "QUILL-APK-143",
                       "affected": str(apk_path),
                       "remediation": "Sign with a production release keystore before distribution."},
-                output_file=str(out_file))
+                output_file=str(out_file),
+                category="Code Signing")
 
     cert_summary = "; ".join(result["certs"][:5]) if result["certs"] else "(no cert details extracted)"
     schemes = []
@@ -3913,7 +3940,19 @@ _PII_BODY_PATTERNS = {
     "ssn": re.compile(r'\b\d{3}-\d{2}-\d{4}\b'),
     "credit_card": re.compile(r'\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))\d{8,12}\b'),
     "email": re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'),
-    "phone": re.compile(r'\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b'),
+    "phone": re.compile(
+        r'(?<![.\deE])'
+        r'(?:\+?1[-\s])?'
+        r'(?:'
+            r'\([2-9]\d{2}\)\s?'
+            r'|'
+            r'[2-9]\d{2}[-\s]'
+        r')'
+        r'[2-9]\d{2}'
+        r'[-\s]'
+        r'\d{4}'
+        r'(?![.\d])'
+    ),
     "password_field": re.compile(r'"(?:password|passwd|pwd|pass|secret)"\s*:\s*"[^"]*"', re.IGNORECASE),
 }
 
@@ -4585,6 +4624,7 @@ def mitm_capture(target_process: str, platform: str, device: str,
                     data={"catalogue_id": "QUILL-INST-001",
                           "affected": target_process,
                           "remediation": "N/A — informational finding about detection presence."},
+                    category="Application Hardening",
                 )
             if _inst_data["ssl_pinning_found"]:
                 finding(
@@ -4597,6 +4637,7 @@ def mitm_capture(target_process: str, platform: str, device: str,
                     data={"catalogue_id": "QUILL-INST-002",
                           "affected": target_process,
                           "remediation": "N/A — informational finding. Pinning is a defense."},
+                    category="Transport Security",
                 )
             if _inst_data["no_screenshot_protection"]:
                 finding(
@@ -4615,6 +4656,7 @@ def mitm_capture(target_process: str, platform: str, device: str,
                               "(Android). On iOS, overlay a blur or placeholder in "
                               "applicationWillResignActive. Prevent screenshots on "
                               "login, payment, and profile screens.")},
+                    category="Application Hardening",
                 )
             _n_inst = sum(1 for k in ("root_detection_found", "ssl_pinning_found",
                                        "no_screenshot_protection") if _inst_data[k])
@@ -4736,7 +4778,8 @@ def _mitm_check_cleartext(flows, evidence_dir):
                           "command": f"mitmdump — {flow.request.method} {flow.request.url}",
                           "remediation": "Enforce HTTPS for all communications. Implement HSTS."
                     }, output=f"{flow.request.method} {flow.request.url[:300]}\nScheme: HTTP (unencrypted)",
-                    output_file=ev[0] if ev else "")
+                    output_file=ev[0] if ev else "",
+                    category="Transport Security")
 
 
 def _mitm_check_sensitive_urls(flows, evidence_dir):
@@ -4748,6 +4791,7 @@ def _mitm_check_sensitive_urls(flows, evidence_dir):
                 seq += 1
                 ev = _write_mitm_evidence(flow, evidence_dir, seq)
                 finding(title=f"Sensitive Data in URL ({pat_name})", severity="HIGH",
+                        category="Sensitive Data Exposure",
                         description=f"The request URL contains {pat_name} data: "
                                     f"{flow.request.method} {flow.request.pretty_host}"
                                     f"{flow.request.path}. URLs are logged, cached, and "
@@ -4779,6 +4823,7 @@ def _mitm_check_sensitive_bodies(flows, evidence_dir):
                     matched_ctx = text[max(0, m.start()-30):m.end()+30] if m else ""
                     finding(title=f"Sensitive Data in {src_name.title()} Body ({pat_name})",
                             severity="MEDIUM",
+                            category="Sensitive Data Exposure",
                             description=f"The {src_name} body to "
                                         f"{flow.request.pretty_host} contains {pat_name} data.",
                             data={"catalogue_id": "QUILL-MITM-003",
@@ -5350,6 +5395,7 @@ def _phase_finding_adapter(**kwargs) -> None:
         data["remediation"] = kwargs.pop("remediation")
     if "command" in kwargs:
         data["command"] = kwargs.pop("command")
+    _cat = kwargs.pop("category", "")
     extra_keys = set(kwargs.keys()) - {"title", "severity", "description", "output_file", "output"}
     for k in extra_keys:
         data[k] = kwargs.pop(k)
@@ -5360,6 +5406,7 @@ def _phase_finding_adapter(**kwargs) -> None:
         data=data if data else None,
         output_file=kwargs.get("output_file", ""),
         output=kwargs.get("output", ""),
+        category=_cat,
     )
 
 
