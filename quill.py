@@ -5156,6 +5156,7 @@ def extract_emails(app_dir: Path, output_dir: Path, platform: str) -> dict:
     raw_emails = _EMAIL_RX.findall(all_text)
 
     emails_dedup: dict = {}
+    _camel_rx = re.compile(r'[a-z][A-Z]')
     for e in raw_emails:
         e_lower = e.lower()
         if "%" in e or "$" in e:
@@ -5166,11 +5167,30 @@ def extract_emails(app_dir: Path, output_dir: Path, platform: str) -> dict:
         if len(local) < 2 or len(local) > 64:
             continue
         domain = e_lower.rsplit("@", 1)[-1]
-        if domain not in _JUNK_EMAIL_DOMAINS and not e_lower.endswith(".png") and \
-           not e_lower.endswith(".jpg") and not e_lower.endswith(".xml") and \
-           not e_lower.endswith(".so") and not e_lower.endswith(".dylib") and \
-           not e_lower.endswith(".class"):
-            emails_dedup.setdefault(e_lower, e)
+        domain_orig = e.rsplit("@", 1)[-1]
+        if domain in _JUNK_EMAIL_DOMAINS:
+            continue
+        if e_lower.endswith((".png", ".jpg", ".xml", ".so", ".dylib", ".class")):
+            continue
+        tld = domain.rsplit(".", 1)[-1] if "." in domain else ""
+        if not tld or len(tld) > 12 or not tld.isalpha():
+            continue
+        first_label = domain.split(".")[0]
+        if first_label.isdigit():
+            continue
+        if _camel_rx.search(domain_orig):
+            continue
+        if local.startswith("_") and "@" in e:
+            parts = domain.split(".")
+            if len(parts) >= 2 and parts[0].isdigit():
+                continue
+        emails_dedup.setdefault(e_lower, e)
+
+    for key in list(emails_dedup):
+        if key.endswith("r"):
+            base = key[:-1]
+            if base in emails_dedup:
+                del emails_dedup[key]
 
     sorted_emails = sorted(emails_dedup.values())
     result = {
