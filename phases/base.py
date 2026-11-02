@@ -52,7 +52,9 @@ class UserGate:
 
         log_fn(f"[gate] {self.instruction}")
 
-        if self.gate_type == GateType.AUTO_DETECT and self.auto_detect_fn:
+        import os
+        _managed = os.environ.get("CRUCIBLE_MANAGED", "") == "1"
+        if self.gate_type == GateType.AUTO_DETECT and self.auto_detect_fn and not _managed:
             tok_fn("__CRUCIBLE_STATUS__", json.dumps({
                 "phase": "gate", "label": self.instruction,
                 "state": "waiting", "step": "auto-detecting",
@@ -69,6 +71,8 @@ class UserGate:
                     pass
                 time.sleep(self.auto_detect_interval)
             log_fn("[gate] Auto-detect timed out — falling back to manual prompt")
+        elif _managed and self.gate_type == GateType.AUTO_DETECT:
+            log_fn("[gate] Managed mode — skipping auto-detect, prompting user")
 
         prompt_id = self.prompt_id or f"gate_{int(time.time())}"
         tok_fn("__CRUCIBLE_PROMPT__", json.dumps({
