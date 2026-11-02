@@ -3706,7 +3706,8 @@ def response(flow: http.HTTPFlow):
 '''
 
 
-def dynamic_analysis(target: str, platform: str, device: str, output_dir: Path) -> None:
+def dynamic_analysis(target: str, platform: str, device: str, output_dir: Path,
+                     *, skip_ssl: bool = False) -> None:
     _check_pause()
     _save_checkpoint()
     log(f"[dynamic] Starting Frida dynamic analysis — target={target}, platform={platform}, device={device or 'local'}")
@@ -3739,6 +3740,10 @@ def dynamic_analysis(target: str, platform: str, device: str, output_dir: Path) 
             ("keychain", "Keychain monitoring", _FRIDA_IOS_KEYCHAIN_SCRIPT, "QUILL-DYN-012"),
         ]
 
+    if skip_ssl:
+        checks = [(cid, lbl, sc, cat) for cid, lbl, sc, cat in checks
+                   if cid != "ssl_pinning"]
+        log(f"[dynamic] SSL pinning bypass skipped — already active via MITM Frida session")
     log(f"[dynamic] Running {len(checks)} Frida check(s) on {platform} target")
     for check_id, label, script_code, catalogue_id in checks:
         _check_pause()
@@ -4001,7 +4006,8 @@ def mitm_capture(target_process: str, platform: str, device: str,
                  upstream_proxy: str = "",
                  burp_ca: str = "",
                  ignore_hosts: str = "",
-                 instrumentation_hooks: bool = False, **_kw) -> Optional[Path]:
+                 instrumentation_hooks: bool = False,
+                 pre_wait_callback=None, **_kw) -> Optional[Path]:
     _check_pause()
     _save_checkpoint()
     log(f"[mitm] Starting MITM traffic capture — port={port}, "
@@ -4378,6 +4384,15 @@ def mitm_capture(target_process: str, platform: str, device: str,
             log(f"[mitm] Frida launch failed (capture continues without SSL bypass): {exc}")
     else:
         log("[mitm] Frida SSL bypass skipped — using external bypass (upstream proxy / manual)")
+
+    if pre_wait_callback is not None:
+        log("[mitm] Proxy + Frida bypass active — running dynamic analysis while capturing...")
+        status("mitm_capture", "Dynamic analysis (proxy capturing)", "running")
+        try:
+            pre_wait_callback()
+        except Exception as _cb_exc:
+            err(f"[mitm] Dynamic analysis during MITM failed: {_cb_exc}")
+        log("[mitm] Dynamic analysis complete — continue exercising the app for traffic capture")
 
     import time as _time_mod
     mitm_sentinel = output_dir / "_mitm_stop"
@@ -5624,58 +5639,42 @@ def main() -> int:
     else:
         log("[phases] Phase system disabled (--no-phases or --phases none)")
 
+    # ── Resolve dynamic target process (shared by dynamic + MITM) ──
     _check_pause()
-    _CURRENT_ROLES = "FRIDA"
-    if run_dynamic:
-        log("[main] Dynamic analysis requested — resolving target process...")
-        target_process = args.target_process
-        if not target_process:
-            if platform == "android":
-                app_dir_for_pkg = extract_dir
-                manifest = app_dir_for_pkg / "AndroidManifest.xml"
-                if not manifest.exists() and app_dir:
-                    manifest = app_dir / "AndroidManifest.xml"
-                if manifest.exists():
-                    try:
-                        tree = ET.parse(manifest)
-                        target_process = tree.getroot().get("package", "")
-                    except Exception:
-                        pass
-            if not target_process and app_path:
-                target_process = Path(app_path).stem
-            if not target_process:
-                if run_mitm:
-                    log("[main] No target process — skipping Frida dynamic analysis (MITM-only)")
-                else:
-                    err("[main] Cannot resolve dynamic target — no --target-process and no app binary")
-                    return 1
-        if target_process:
-            log(f"[main] Dynamic target process resolved: {target_process}")
-            dynamic_analysis(target_process, platform, args.device, project_dir)
+    _dyn_target = args.target_process
+    if not _dyn_target and (run_dynamic or run_mitm):
+        if platform == "android":
+            _dyn_manifest = extract_dir / "AndroidManifest.xml"
+            if not _dyn_manifest.exists() and app_dir:
+                _dyn_manifest = app_dir / "AndroidManifest.xml"
+            if _dyn_manifest.exists():
+                try:
+                    _dyn_target = ET.parse(_dyn_manifest).getroot().get("package", "")
+                except Exception:
+                    pass
+        if not _dyn_target and app_path:
+            _dyn_target = Path(app_path).stem
+    if run_dynamic and not _dyn_target:
+        if run_mitm:
+            log("[main] No target process — skipping Frida dynamic analysis (MITM-only)")
+        else:
+            err("[main] Cannot resolve dynamic target — no --target-process and no app binary")
+            return 1
 
-    _check_pause()
-    _CURRENT_ROLES = "MITM"
+    # ── MITM + Dynamic combined (single crawl) or standalone ──
     if run_mitm:
-        log("[main] MITM traffic analysis requested — resolving target process...")
-        mitm_target = args.target_process
-        if not mitm_target:
-            if platform == "android":
-                manifest = extract_dir / "AndroidManifest.xml"
-                if not manifest.exists() and app_dir:
-                    manifest = app_dir / "AndroidManifest.xml"
-                if manifest.exists():
-                    try:
-                        tree = ET.parse(manifest)
-                        mitm_target = tree.getroot().get("package", "")
-                    except Exception:
-                        pass
-            if not mitm_target and app_path:
-                mitm_target = Path(app_path).stem
-            if not mitm_target:
-                mitm_target = "unknown"
-                log("[main] MITM target process unknown — capturing all traffic on proxy port")
+        _CURRENT_ROLES = "MITM"
+        mitm_target = _dyn_target or "unknown"
+        if mitm_target == "unknown":
+            log("[main] MITM target process unknown — capturing all traffic on proxy port")
+        else:
             log(f"[main] MITM target process: {mitm_target}")
         _do_combined = not _skip_phases and (_phase_set is None or "instrumentation" in (_phase_set or set()))
+        _dyn_cb = None
+        if run_dynamic and _dyn_target:
+            log(f"[main] Dynamic + MITM combined — Frida checks run while proxy captures")
+            _dyn_cb = lambda: dynamic_analysis(
+                _dyn_target, platform, args.device, project_dir, skip_ssl=True)
         flows_file = mitm_capture(
             mitm_target, platform, args.device, project_dir,
             port=args.mitm_port,
@@ -5683,9 +5682,14 @@ def main() -> int:
             upstream_proxy=args.mitm_upstream_proxy,
             burp_ca=args.mitm_burp_ca,
             ignore_hosts=args.mitm_ignore_hosts,
-            instrumentation_hooks=_do_combined)
+            instrumentation_hooks=_do_combined,
+            pre_wait_callback=_dyn_cb)
         if flows_file:
             mitm_analyse(project_dir, flows_file)
+    elif run_dynamic and _dyn_target:
+        _CURRENT_ROLES = "FRIDA"
+        log(f"[main] Dynamic target process resolved: {_dyn_target}")
+        dynamic_analysis(_dyn_target, platform, args.device, project_dir)
 
     ended_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     log(f"[finalize] Analysis phases complete — writing output files...")
