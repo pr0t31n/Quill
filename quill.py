@@ -72,6 +72,7 @@ except ImportError:
 
 _MANAGED = os.environ.get("CRUCIBLE_MANAGED", "") == "1"
 _findings: list = []
+_CURRENT_ROLES: str = ""
 
 _fdb = None
 _db_path = os.environ.get("PR0T31N_FINDINGS_DB")
@@ -229,6 +230,8 @@ def finding(*, title: str, severity: str, description: str,
             "output_file": of_rel,
             "data": data or {},
         }
+    if _CURRENT_ROLES:
+        rec["roles"] = _CURRENT_ROLES
     _findings.append(rec)
     if _fdb:
         try:
@@ -5356,6 +5359,7 @@ def main() -> int:
     _EXTRACT_BASE = extract_dir
 
     _check_pause()
+    global _CURRENT_ROLES
     app_dir = None
     manifest_data = {}
     plist_data = {}
@@ -5366,6 +5370,7 @@ def main() -> int:
         if not app_dir:
             return 1
         if run_static:
+            _CURRENT_ROLES = "STATIC"
             _check_pause()
             plist_data = analyse_info_plist(app_dir, project_dir)
             _check_pause()
@@ -5397,6 +5402,7 @@ def main() -> int:
         if not app_dir:
             return 1
         if run_static:
+            _CURRENT_ROLES = "STATIC"
             _check_pause()
             manifest_data = analyse_manifest(app_dir, project_dir)
             _check_pause()
@@ -5431,6 +5437,7 @@ def main() -> int:
             log("[main] Static analysis skipped (mode=dynamic)")
 
     # ── Phase system ──────────────────────────────────────────────────
+    _CURRENT_ROLES = "FRIDA"
     _skip_phases = args.no_phases or args.phases.lower() == "none"
     if not _skip_phases:
         _phase_set = None
@@ -5471,6 +5478,7 @@ def main() -> int:
         log("[phases] Phase system disabled (--no-phases or --phases none)")
 
     _check_pause()
+    _CURRENT_ROLES = "FRIDA"
     if run_dynamic:
         log("[main] Dynamic analysis requested — resolving target process...")
         target_process = args.target_process
@@ -5499,6 +5507,7 @@ def main() -> int:
             dynamic_analysis(target_process, platform, args.device, project_dir)
 
     _check_pause()
+    _CURRENT_ROLES = "MITM"
     if run_mitm:
         log("[main] MITM traffic analysis requested — resolving target process...")
         mitm_target = args.target_process
