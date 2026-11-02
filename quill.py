@@ -3737,7 +3737,7 @@ def dynamic_analysis(target: str, platform: str, device: str, output_dir: Path) 
         cmd = [frida_bin]
         if device:
             cmd.extend(["-D", device])
-        cmd.extend(["-n", target, "-l", str(script_file), "--no-pause", "-q"])
+        cmd.extend(["-n", target, "-l", str(script_file), "-q"])
 
         try:
             if _ur is not None:
@@ -4297,8 +4297,7 @@ def mitm_capture(target_process: str, platform: str, device: str,
         frida_cmd = [frida_bin]
         if device:
             frida_cmd.extend(["-D", device])
-        frida_cmd.extend(["-n", target_process, "-l", str(ssl_script_file),
-                          "--no-pause", "-q"])
+        frida_cmd.extend(["-n", target_process, "-l", str(ssl_script_file), "-q"])
         log(f"[mitm] Launching Frida SSL bypass: {' '.join(frida_cmd)}")
         try:
             frida_proc = subprocess.Popen(frida_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
