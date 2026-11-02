@@ -3549,6 +3549,61 @@ _seen_auth = set()
 _seen_api = set()
 _seen_web = set()
 
+_THIRD_PARTY_SUFFIXES = (
+    ".typeform.com", ".ampproject.org", ".googleapis.com", ".gstatic.com",
+    ".googleusercontent.com", ".google-analytics.com", ".googlesyndication.com",
+    ".googletagmanager.com", ".doubleclick.net", ".googlevideo.com",
+    ".youtube.com", ".ytimg.com", ".ggpht.com",
+    ".facebook.com", ".fbcdn.net", ".facebook.net",
+    ".twitter.com", ".twimg.com",
+    ".cloudflare.com", ".cloudflareinsights.com",
+    ".cloudfront.net", ".amazonaws.com",
+    ".akamaized.net", ".akamai.net", ".akamaihd.net",
+    ".fastly.net", ".fastlylb.net",
+    ".cdn77.org", ".stackpathdns.com",
+    ".sentry.io", ".sentry-cdn.com",
+    ".segment.io", ".segment.com",
+    ".mixpanel.com", ".mxpnl.com",
+    ".intercom.io", ".intercomcdn.com",
+    ".zendesk.com", ".zdassets.com",
+    ".hotjar.com", ".hotjar.io",
+    ".newrelic.com", ".nr-data.net",
+    ".datadoghq.com", ".datadoghq.eu",
+    ".launchdarkly.com",
+    ".stripe.com", ".stripe.network",
+    ".braintreegateway.com", ".braintree-api.com",
+    ".paypal.com", ".paypalobjects.com",
+    ".apple.com", ".mzstatic.com", ".icloud.com",
+    ".microsoft.com", ".msecnd.net", ".live.com",
+    ".linkedin.com", ".licdn.com",
+    ".instagram.com", ".cdninstagram.com",
+    ".tiktok.com", ".tiktokcdn.com",
+    ".snapchat.com", ".snap.com",
+    ".pinterest.com", ".pinimg.com",
+    ".hubspot.com", ".hsforms.com", ".hubapi.com",
+    ".salesforce.com", ".force.com",
+    ".atlassian.net", ".atlassian.com",
+    ".slack.com", ".slack-edge.com",
+    ".twilio.com",
+    ".sendgrid.net", ".sendgrid.com",
+    ".mailgun.net", ".mailgun.com",
+    ".fullstory.com",
+    ".amplitude.com",
+    ".branch.io", ".app.link",
+    ".appsflyer.com",
+    ".adjust.com",
+    ".onesignal.com",
+    ".pusher.com",
+    ".pubnub.com",
+    ".firebaseio.com", ".firebaseapp.com",
+    ".crashlytics.com",
+    ".app-measurement.com",
+)
+
+def _is_third_party(host):
+    h = host.lower()
+    return any(h.endswith(s) or h == s.lstrip(".") for s in _THIRD_PARTY_SUFFIXES)
+
 _API_CT = ("application/json", "application/graphql", "application/xml",
            "text/xml", "application/grpc", "application/protobuf")
 _API_PATHS = ("/api/", "/v1/", "/v2/", "/v3/", "/v4/", "/graphql",
@@ -3596,11 +3651,12 @@ def tls_established_client(data):
         del _tls_fail_counts[sni]
 
 def _is_api(flow):
-    ct = (flow.response.headers.get("content-type", "") or "").lower()
     path = flow.request.path.lower()
-    if any(api_ct in ct for api_ct in _API_CT):
-        return True
     if any(p in path for p in _API_PATHS):
+        return True
+    host = flow.request.pretty_host.lower()
+    first_label = host.split(".")[0]
+    if first_label == "api" or first_label.startswith("api-"):
         return True
     return False
 
@@ -3608,6 +3664,8 @@ def response(flow: http.HTTPFlow):
     if not flow.response:
         return
     host = flow.request.pretty_host
+    if _is_third_party(host):
+        return
     scheme = flow.request.scheme
     port = flow.request.port
     base = f"{scheme}://{host}" + (f":{port}" if port not in (80, 443) else "")
@@ -4274,16 +4332,20 @@ def mitm_capture(target_process: str, platform: str, device: str,
                     priority="HIGH", metadata=auth_meta)
                 authed_web += 1
             else:
-                _emit_noauth_action_item(
+                _emit_action_item(
                     "webapp_discovered", "fracture", p["base"],
                     f"Web target from MITM capture (no auth): {p['host']}",
-                    f"Quill MITM captured live web traffic to {p['host']} but no "
-                    f"authentication was captured. Manual auth configuration required.")
+                    f"Quill MITM captured live web traffic to {p['host']}. "
+                    f"Fracture can perform unauthenticated checks against this target.",
+                    priority="MEDIUM", metadata={"no_auth_captured": True})
                 noauth_web += 1
         _pending_web_targets.clear()
-        if noauth_api or noauth_web:
-            log(f"[mitm] {noauth_api} API + {noauth_web} web targets emitted "
+        if noauth_api:
+            log(f"[mitm] {noauth_api} API targets emitted "
                 f"WITHOUT auth (manual approval required)")
+        if noauth_web:
+            log(f"[mitm] {noauth_web} web targets emitted "
+                f"WITHOUT auth (Fracture auto-queue eligible)")
 
     def _drain_mitm(stream, label):
         try:
@@ -4577,6 +4639,30 @@ def mitm_capture(target_process: str, platform: str, device: str,
     return flows_file
 
 
+_THIRD_PARTY_SUFFIXES = (
+    ".typeform.com", ".ampproject.org", ".googleapis.com",
+    ".gstatic.com", ".google-analytics.com", ".googletagmanager.com",
+    ".googlesyndication.com", ".doubleclick.net", ".facebook.com",
+    ".facebook.net", ".fbcdn.net", ".twitter.com", ".twimg.com",
+    ".cloudflare.com", ".cdn.cloudflare.com", ".cloudfront.net",
+    ".akamai.net", ".akamaized.net", ".fastly.net",
+    ".newrelic.com", ".nr-data.net", ".sentry.io",
+    ".datadoghq.com", ".segment.io", ".segment.com",
+    ".mixpanel.com", ".amplitude.com", ".braze.com",
+    ".intercom.io", ".intercomcdn.com", ".zendesk.com",
+    ".hotjar.com", ".fullstory.com", ".optimizely.com",
+    ".launchdarkly.com", ".appsflyer.com", ".branch.io",
+    ".adjust.com", ".onesignal.com", ".pusher.com",
+    ".pubnub.com", ".firebase.google.com", ".firebaseio.com",
+    ".crashlytics.com", ".app-measurement.com",
+)
+
+
+def _is_third_party(host: str) -> bool:
+    h = host.lower()
+    return any(h.endswith(s) or h == s.lstrip(".") for s in _THIRD_PARTY_SUFFIXES)
+
+
 def mitm_analyse(output_dir: Path, flows_file: Path) -> None:
     _check_pause()
     log("[mitm-analyse] Starting traffic analysis...")
@@ -4604,6 +4690,14 @@ def mitm_analyse(output_dir: Path, flows_file: Path) -> None:
         return
     if not flows:
         log("[mitm-analyse] No HTTP flows found in capture")
+        status("mitm_analyse", "MITM traffic analysis", "complete")
+        return
+    pre_filter = len(flows)
+    flows = [fl for fl in flows if not _is_third_party(fl.request.pretty_host)]
+    if pre_filter != len(flows):
+        log(f"[mitm-analyse] Filtered {pre_filter - len(flows)} third-party flow(s)")
+    if not flows:
+        log("[mitm-analyse] No first-party HTTP flows after filtering")
         status("mitm_analyse", "MITM traffic analysis", "complete")
         return
     log(f"[mitm-analyse] Loaded {len(flows)} HTTP flow(s)")
@@ -6044,6 +6138,8 @@ def _generate_cross_tool_action_items(project_dir: Path) -> None:
                     continue
                 if not host or host in ("localhost", "127.0.0.1"):
                     continue
+                if _is_third_party(host):
+                    continue
                 if any(kw in url.lower() for kw in
                        ("/api/", "/v1/", "/v2/", "/v3/", "/graphql", "/rest/")):
                     _api_urls.add(url)
@@ -6065,7 +6161,7 @@ def _generate_cross_tool_action_items(project_dir: Path) -> None:
             host = urlparse(url).hostname or ""
         except Exception:
             continue
-        if host in _api_hosts:
+        if host in _api_hosts or _is_third_party(host):
             continue
         _api_hosts.add(host)
         _add("api", "Siphon", url, f"API endpoint from mobile app: {host}",
@@ -6082,7 +6178,7 @@ def _generate_cross_tool_action_items(project_dir: Path) -> None:
             host = urlparse(url).hostname or ""
         except Exception:
             continue
-        if host in _web_hosts or host in _api_hosts:
+        if host in _web_hosts or host in _api_hosts or _is_third_party(host):
             continue
         _web_hosts.add(host)
         _add("web_app", "Fracture", url, f"Web target from mobile app: {host}",
