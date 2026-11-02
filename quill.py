@@ -5928,12 +5928,12 @@ def _generate_cross_tool_action_items(project_dir: Path) -> None:
     # Findings-based action items
     for f in findings:
         title_l = (f.get("title") or "").lower()
-        data = f.get("data") or {}
+        _affected = f.get("affected") or f.get("ip") or ""
 
         # Cloud credentials → Forge (confirm — requires cloud creds)
         if any(kw in title_l for kw in _CLOUD_PATTERNS):
             _add("cloud_audit", "Forge",
-                 data.get("affected", "mobile app"),
+                 _affected or "mobile app",
                  f"Cloud credential from mobile app",
                  f"Quill found {f.get('title', 'a cloud credential')} in the mobile "
                  f"application. Forge can audit the associated cloud environment "
@@ -5942,25 +5942,14 @@ def _generate_cross_tool_action_items(project_dir: Path) -> None:
                  source_finding=f.get("title", ""),
                  approval_tier="confirm")
 
-        # API keys → Siphon
+        # API keys → Siphon (confirm — needs endpoint URL)
         if any(kw in title_l for kw in _API_PATTERNS):
             _add("api", "Siphon",
-                 data.get("affected", "mobile app"),
+                 _affected or "mobile app",
                  f"API credential from mobile app",
                  f"Quill found {f.get('title', 'an API credential')} in the mobile "
                  f"application. Siphon can use discovered credentials to test "
                  f"API endpoints for authorization flaws.",
-                 priority="HIGH",
-                 source_finding=f.get("title", ""))
-
-        # Private keys / certs → Isotope (confirm — needs file extraction)
-        if "private key" in title_l or "certificate" in title_l:
-            _add("file_analysis", "Isotope",
-                 data.get("affected", "mobile app"),
-                 f"Certificate/key from mobile app",
-                 f"Quill found {f.get('title', 'embedded key material')} in the mobile "
-                 f"application. Isotope can perform deeper certificate chain "
-                 f"analysis and extract additional metadata.",
                  priority="HIGH",
                  source_finding=f.get("title", ""),
                  approval_tier="confirm")
