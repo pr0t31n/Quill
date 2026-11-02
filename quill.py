@@ -64,7 +64,12 @@ try:
     logging.getLogger("androguard").setLevel(logging.WARNING)
     try:
         from loguru import logger as _loguru_logger
-        _loguru_logger.disable("androguard")
+        _loguru_logger.remove()
+        _loguru_logger.add(
+            sys.stderr,
+            filter=lambda r: not r["name"].startswith("androguard"),
+            level="DEBUG",
+        )
     except ImportError:
         pass
 except ImportError:
