@@ -315,7 +315,7 @@ class InstrumentationPhase(Phase):
             return result
 
         cmd = [frida_bin, "-U", "-l", str(script_path), "-f", package,
-               "--no-pause", "-o", str(out / "frida_output.log")]
+               "-o", str(out / "frida_output.log")]
 
         self.log(f"[instrumentation] Spawning: {' '.join(cmd)}")
         try:
