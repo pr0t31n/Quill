@@ -5597,11 +5597,11 @@ def main() -> int:
         elif not run_static:
             log("[main] Static analysis skipped (mode=dynamic)")
 
-    # ── Phase system ──────────────────────────────────────────────────
-    _CURRENT_ROLES = "FRIDA"
+    # ── Resolve target process (shared by phases + dynamic + MITM) ──
+    _check_pause()
     _skip_phases = args.no_phases or args.phases.lower() == "none"
+    _phase_set = None
     if not _skip_phases:
-        _phase_set = None
         if args.phases.lower() != "all":
             _phase_set = set(p.strip() for p in args.phases.split(",") if p.strip())
             _unknown = _phase_set - _ALL_PHASES
@@ -5611,38 +5611,11 @@ def main() -> int:
             if not _phase_set:
                 log("[phases] No valid phases specified — skipping phase system")
                 _skip_phases = True
-        if not _skip_phases:
-            _frida_dir = Path(__file__).resolve().parent / "frida_scripts"
-            _target_proc = args.target_process
-            if not _target_proc:
-                if platform == "android" and app_dir:
-                    _m = app_dir / "AndroidManifest.xml"
-                    if not _m.exists():
-                        _m = extract_dir / "AndroidManifest.xml"
-                    if _m.exists():
-                        try:
-                            _target_proc = ET.parse(_m).getroot().get("package", "")
-                        except Exception:
-                            pass
-                if not _target_proc and app_path:
-                    _target_proc = Path(app_path).stem
-            _phase_results = _run_phases(
-                platform=platform,
-                app_dir=app_dir,
-                project_dir=project_dir,
-                device_id=args.device,
-                target_process=_target_proc or "",
-                enabled_phases=_phase_set,
-                frida_scripts_dir=_frida_dir,
-                mitm_combined=run_mitm,
-            )
     else:
         log("[phases] Phase system disabled (--no-phases or --phases none)")
 
-    # ── Resolve dynamic target process (shared by dynamic + MITM) ──
-    _check_pause()
     _dyn_target = args.target_process
-    if not _dyn_target and (run_dynamic or run_mitm):
+    if not _dyn_target and (run_dynamic or run_mitm or not _skip_phases):
         if platform == "android":
             _dyn_manifest = extract_dir / "AndroidManifest.xml"
             if not _dyn_manifest.exists() and app_dir:
@@ -5661,7 +5634,23 @@ def main() -> int:
             err("[main] Cannot resolve dynamic target — no --target-process and no app binary")
             return 1
 
-    # ── MITM + Dynamic combined (single crawl) or standalone ──
+    _frida_dir = Path(__file__).resolve().parent / "frida_scripts"
+
+    def _run_phases_block():
+        """Run the phase system — called standalone or inside MITM window."""
+        _CURRENT_ROLES = "FRIDA"
+        return _run_phases(
+            platform=platform,
+            app_dir=app_dir,
+            project_dir=project_dir,
+            device_id=args.device,
+            target_process=_dyn_target or "",
+            enabled_phases=_phase_set,
+            frida_scripts_dir=_frida_dir,
+            mitm_combined=run_mitm,
+        )
+
+    # ── MITM-first flow (proxy active for phases + dynamic + capture) ──
     if run_mitm:
         _CURRENT_ROLES = "MITM"
         mitm_target = _dyn_target or "unknown"
@@ -5670,11 +5659,15 @@ def main() -> int:
         else:
             log(f"[main] MITM target process: {mitm_target}")
         _do_combined = not _skip_phases and (_phase_set is None or "instrumentation" in (_phase_set or set()))
-        _dyn_cb = None
-        if run_dynamic and _dyn_target:
-            log(f"[main] Dynamic + MITM combined — Frida checks run while proxy captures")
-            _dyn_cb = lambda: dynamic_analysis(
-                _dyn_target, platform, args.device, project_dir, skip_ssl=True)
+
+        def _mitm_pre_wait():
+            if not _skip_phases:
+                log("[main] Running phase system while MITM proxy captures traffic...")
+                _run_phases_block()
+            if run_dynamic and _dyn_target:
+                log("[main] Running dynamic Frida checks while MITM proxy captures traffic...")
+                dynamic_analysis(_dyn_target, platform, args.device, project_dir, skip_ssl=True)
+
         flows_file = mitm_capture(
             mitm_target, platform, args.device, project_dir,
             port=args.mitm_port,
@@ -5683,13 +5676,17 @@ def main() -> int:
             burp_ca=args.mitm_burp_ca,
             ignore_hosts=args.mitm_ignore_hosts,
             instrumentation_hooks=_do_combined,
-            pre_wait_callback=_dyn_cb)
+            pre_wait_callback=_mitm_pre_wait)
         if flows_file:
             mitm_analyse(project_dir, flows_file)
-    elif run_dynamic and _dyn_target:
-        _CURRENT_ROLES = "FRIDA"
-        log(f"[main] Dynamic target process resolved: {_dyn_target}")
-        dynamic_analysis(_dyn_target, platform, args.device, project_dir)
+    else:
+        # ── No MITM — phases and dynamic run standalone ──
+        if not _skip_phases:
+            _run_phases_block()
+        if run_dynamic and _dyn_target:
+            _CURRENT_ROLES = "FRIDA"
+            log(f"[main] Dynamic target process resolved: {_dyn_target}")
+            dynamic_analysis(_dyn_target, platform, args.device, project_dir)
 
     ended_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     log(f"[finalize] Analysis phases complete — writing output files...")
