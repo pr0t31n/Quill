@@ -237,12 +237,15 @@ class ResiliencePhase(Phase):
             self.err(f"[resilience] Frida root bypass test failed: {exc}")
             ev_data["frida_bypass_error"] = str(exc)
         finally:
-            if not self._device.is_app_running(self.package):
-                try:
-                    self._device.launch_app(self.package)
-                    time.sleep(2)
-                except Exception:
-                    pass
+            try:
+                self._device.kill_app(self.package)
+            except Exception:
+                pass
+            try:
+                self._device.launch_app(self.package)
+                time.sleep(3)
+            except Exception:
+                pass
 
         return findings
 

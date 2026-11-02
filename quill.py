@@ -5824,7 +5824,7 @@ def _generate_cross_tool_action_items(project_dir: Path) -> None:
     seen: set = set()
 
     def _add(item_type, tool, target, title, desc, priority="MEDIUM",
-             source_finding="", metadata=None):
+             source_finding="", metadata=None, approval_tier="auto"):
         key = (tool.lower(), target.lower(), title.strip().lower())
         if key in seen:
             return
@@ -5856,7 +5856,7 @@ def _generate_cross_tool_action_items(project_dir: Path) -> None:
                 "title": title,
                 "description": desc,
                 "priority": priority,
-                "approval_tier": "auto",
+                "approval_tier": approval_tier,
                 "source_tool": "quill",
                 "scope": _q_scope,
                 "metadata": metadata or {},
@@ -5930,7 +5930,7 @@ def _generate_cross_tool_action_items(project_dir: Path) -> None:
         title_l = (f.get("title") or "").lower()
         data = f.get("data") or {}
 
-        # Cloud credentials → Forge
+        # Cloud credentials → Forge (confirm — requires cloud creds)
         if any(kw in title_l for kw in _CLOUD_PATTERNS):
             _add("cloud_audit", "Forge",
                  data.get("affected", "mobile app"),
@@ -5939,7 +5939,8 @@ def _generate_cross_tool_action_items(project_dir: Path) -> None:
                  f"application. Forge can audit the associated cloud environment "
                  f"for misconfigurations and exposed resources.",
                  priority="CRITICAL",
-                 source_finding=f.get("title", ""))
+                 source_finding=f.get("title", ""),
+                 approval_tier="confirm")
 
         # API keys → Siphon
         if any(kw in title_l for kw in _API_PATTERNS):
@@ -5952,7 +5953,7 @@ def _generate_cross_tool_action_items(project_dir: Path) -> None:
                  priority="HIGH",
                  source_finding=f.get("title", ""))
 
-        # Private keys / certs → Isotope
+        # Private keys / certs → Isotope (confirm — needs file extraction)
         if "private key" in title_l or "certificate" in title_l:
             _add("file_analysis", "Isotope",
                  data.get("affected", "mobile app"),
@@ -5961,7 +5962,8 @@ def _generate_cross_tool_action_items(project_dir: Path) -> None:
                  f"application. Isotope can perform deeper certificate chain "
                  f"analysis and extract additional metadata.",
                  priority="HIGH",
-                 source_finding=f.get("title", ""))
+                 source_finding=f.get("title", ""),
+                 approval_tier="confirm")
 
     if not items:
         log("[cross-tool] No cross-tool action items generated")
