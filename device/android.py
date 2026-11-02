@@ -484,8 +484,8 @@ class AndroidDevice(DeviceConnector):
             f"cat /proc/{pid}/maps | grep 'rw-p' | head -50 | "
             f"while IFS='-' read start rest; do "
             f"  end=$(echo $rest | cut -d' ' -f1); "
-            f"  dd if=/proc/{pid}/mem bs=1 skip=$((16#{start})) "
-            f"     count=$(($((16#$end))-$((16#{start})))) "
+            f"  dd if=/proc/{pid}/mem bs=1 skip=$((16#$start)) "
+            f"     count=$(($((16#$end))-$((16#$start)))) "
             f"     >> {remote_dump} 2>/dev/null; "
             f"done"
         )

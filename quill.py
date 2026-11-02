@@ -62,6 +62,11 @@ except ImportError:
 try:
     from androguard.core.axml import AXMLPrinter as _AXMLPrinter
     logging.getLogger("androguard").setLevel(logging.WARNING)
+    try:
+        from loguru import logger as _loguru_logger
+        _loguru_logger.disable("androguard")
+    except ImportError:
+        pass
 except ImportError:
     _AXMLPrinter = None
 
@@ -554,19 +559,17 @@ def _decode_binary_xml_inplace(extract_dir: Path) -> bool:
     if _AXMLPrinter is None:
         log("[extract] androguard not installed — cannot decode binary XML in-place")
         return False
-    ag_log = logging.getLogger("androguard")
-    ag_log.setLevel(logging.WARNING)
-    ag_file_handler = None
+    _loguru_sink_id = None
     if _RUN_DIR is not None:
         try:
+            from loguru import logger as _lu
             ag_log_path = _RUN_DIR / "androguard_debug.log"
-            ag_file_handler = logging.FileHandler(str(ag_log_path), mode="w")
-            ag_file_handler.setLevel(logging.DEBUG)
-            ag_file_handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
-            ag_log.addHandler(ag_file_handler)
-            ag_log.setLevel(logging.DEBUG)
+            _loguru_sink_id = _lu.add(
+                str(ag_log_path), filter="androguard", level="DEBUG", mode="w",
+                format="{level} {name}: {message}")
+            _lu.enable("androguard")
         except Exception:
-            ag_file_handler = None
+            _loguru_sink_id = None
     targets = []
     manifest = extract_dir / "AndroidManifest.xml"
     if manifest.exists():
@@ -592,10 +595,13 @@ def _decode_binary_xml_inplace(extract_dir: Path) -> bool:
             log(f"[extract] Decoded binary XML: {xml_path.name}")
         except Exception as exc:
             err(f"[extract] Failed to decode {xml_path.name}: {exc}")
-    if ag_file_handler is not None:
-        ag_log.removeHandler(ag_file_handler)
-        ag_file_handler.close()
-        ag_log.setLevel(logging.WARNING)
+    if _loguru_sink_id is not None:
+        try:
+            from loguru import logger as _lu
+            _lu.remove(_loguru_sink_id)
+            _lu.disable("androguard")
+        except Exception:
+            pass
     if decoded:
         log(f"[extract] Decoded {decoded} binary XML file(s) via androguard")
         return True
