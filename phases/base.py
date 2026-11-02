@@ -72,7 +72,14 @@ class UserGate:
                 time.sleep(self.auto_detect_interval)
             log_fn("[gate] Auto-detect timed out — falling back to manual prompt")
         elif _managed and self.gate_type == GateType.AUTO_DETECT:
-            log_fn("[gate] Managed mode — skipping auto-detect, prompting user")
+            if self.auto_detect_fn:
+                try:
+                    if self.auto_detect_fn():
+                        log_fn("[gate] Managed mode — condition already met, skipping prompt")
+                        return True
+                except Exception:
+                    pass
+            log_fn("[gate] Managed mode — prompting user")
 
         prompt_id = self.prompt_id or f"gate_{int(time.time())}"
         tok_fn("__CRUCIBLE_PROMPT__", json.dumps({

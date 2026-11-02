@@ -41,16 +41,24 @@ class ResiliencePhase(Phase):
         return True
 
     def _frida_with_timeout(self, fn, label: str, timeout: int = FRIDA_OP_TIMEOUT):
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(fn)
-            try:
-                return future.result(timeout=timeout)
-            except _FuturesTimeout:
-                self.err(f"[resilience] Frida operation timed out after {timeout}s: {label}")
-                return None
-            except Exception as exc:
+        pool = ThreadPoolExecutor(max_workers=1)
+        future = pool.submit(fn)
+        pool.shutdown(wait=False)
+        try:
+            return future.result(timeout=timeout)
+        except _FuturesTimeout:
+            if future.done():
+                try:
+                    exc = future.exception(timeout=0)
+                except Exception as inner:
+                    exc = inner
                 self.err(f"[resilience] Frida operation failed ({label}): {exc}")
-                return None
+            else:
+                self.err(f"[resilience] Frida operation timed out after {timeout}s: {label}")
+            return None
+        except Exception as exc:
+            self.err(f"[resilience] Frida operation failed ({label}): {exc}")
+            return None
 
     def pre_gates(self) -> list[UserGate]:
         return [UserGate(
