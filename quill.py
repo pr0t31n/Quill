@@ -4000,7 +4000,8 @@ def mitm_capture(target_process: str, platform: str, device: str,
                  transparent: bool = False,
                  upstream_proxy: str = "",
                  burp_ca: str = "",
-                 ignore_hosts: str = "", **_kw) -> Optional[Path]:
+                 ignore_hosts: str = "",
+                 instrumentation_hooks: bool = False, **_kw) -> Optional[Path]:
     _check_pause()
     _save_checkpoint()
     log(f"[mitm] Starting MITM traffic capture — port={port}, "
@@ -4043,10 +4044,57 @@ def mitm_capture(target_process: str, platform: str, device: str,
         log(f"[mitm] mitmproxy CA cert copied to {_ca_dst}")
 
     ssl_script_file = None
+    _inst_hooks_loaded = []
     if frida_bin:
         ssl_script = _FRIDA_SSL_PINNING_SCRIPT if platform == "android" else _FRIDA_IOS_SSL_SCRIPT
-        ssl_script_file = mitm_dir / "ssl_bypass.js"
-        ssl_script_file.write_text(ssl_script, encoding="utf-8")
+        if instrumentation_hooks:
+            combined_parts = [
+                "// Quill combined SSL bypass + instrumentation hooks",
+                "// Auto-generated for combined MITM+instrumentation capture",
+                "",
+                "// ── SSL Pinning Bypass ──────────────────────────────",
+                ssl_script,
+                "",
+                "// ── Instrumentation Hooks ───────────────────────────",
+                "var _quill_log = [];",
+                "function quill_emit(hook_id, event_type, data) {",
+                "    var entry = {hook: hook_id, type: event_type, data: data, ts: Date.now()};",
+                "    _quill_log.push(entry);",
+                "    send({type: 'quill_hook', payload: entry});",
+                "}",
+                "",
+            ]
+            try:
+                from phases.instrumentation import _HOOK_SCRIPTS
+            except ImportError:
+                _HOOK_SCRIPTS = {}
+            _frida_scripts_dir = Path("/opt/pr0t31n/Quill/frida_scripts")
+            if not _frida_scripts_dir.is_dir():
+                _frida_scripts_dir = Path(__file__).resolve().parent / "frida_scripts"
+            for hook_id, meta in _HOOK_SCRIPTS.items():
+                if hook_id == "ssl_bypass":
+                    continue
+                if platform and platform not in meta.get("platforms", set()):
+                    continue
+                script_path = _frida_scripts_dir / meta["file"]
+                if not script_path.exists():
+                    continue
+                try:
+                    script_text = script_path.read_text(encoding="utf-8")
+                    combined_parts.append(f"(function() {{ // {meta['display']}")
+                    combined_parts.append(script_text)
+                    combined_parts.append("})();")
+                    combined_parts.append("")
+                    _inst_hooks_loaded.append(hook_id)
+                except OSError:
+                    pass
+            ssl_script_file = mitm_dir / "combined_ssl_and_hooks.js"
+            ssl_script_file.write_text("\n".join(combined_parts), encoding="utf-8")
+            log(f"[mitm] Combined Frida script: SSL bypass + {len(_inst_hooks_loaded)} "
+                f"instrumentation hook(s): {', '.join(_inst_hooks_loaded)}")
+        else:
+            ssl_script_file = mitm_dir / "ssl_bypass.js"
+            ssl_script_file.write_text(ssl_script, encoding="utf-8")
 
     log(f"[mitm] Proxy listening on port {port} — "
         "ensure device proxy points to this host")
@@ -4307,6 +4355,8 @@ def mitm_capture(target_process: str, platform: str, device: str,
     _t_err.start()
 
     frida_proc = None
+    _frida_lines: list = []
+    _t_frida = None
     if frida_bin and ssl_script_file:
         frida_cmd = [frida_bin]
         if device:
@@ -4315,6 +4365,15 @@ def mitm_capture(target_process: str, platform: str, device: str,
         log(f"[mitm] Launching Frida SSL bypass: {' '.join(frida_cmd)}")
         try:
             frida_proc = subprocess.Popen(frida_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            def _drain_frida():
+                try:
+                    for raw in frida_proc.stdout:
+                        line = raw.decode("utf-8", errors="replace").rstrip("\n\r")
+                        _frida_lines.append(line)
+                except Exception:
+                    pass
+            _t_frida = _thr_mod.Thread(target=_drain_frida, daemon=True)
+            _t_frida.start()
         except Exception as exc:
             log(f"[mitm] Frida launch failed (capture continues without SSL bypass): {exc}")
     else:
@@ -4326,12 +4385,20 @@ def mitm_capture(target_process: str, platform: str, device: str,
         mitm_sentinel.unlink()
     if _MANAGED:
         import json as _json_mod
+        _combined_label = ("MITM + instrumentation capture active"
+                           if instrumentation_hooks and _inst_hooks_loaded
+                           else "MITM capture active")
         print("__CRUCIBLE_STATUS__:" + _json_mod.dumps({
-            "phase": "mitm_capture", "label": "MITM capture active",
+            "phase": "mitm_capture", "label": _combined_label,
             "state": "running", "mitm_active": True}), flush=True)
-    log("[mitm] Capturing traffic — exercise the app now "
-        f"(stop via Crucible or touch {mitm_sentinel.name})")
-    status("mitm_capture", "Capturing traffic — stop when ready", "running")
+    if instrumentation_hooks and _inst_hooks_loaded:
+        log(f"[mitm] Capturing traffic + {len(_inst_hooks_loaded)} instrumentation "
+            f"hook(s) — exercise the app now (stop via Crucible or touch {mitm_sentinel.name})")
+        status("mitm_capture", "Combined MITM + instrumentation — stop when ready", "running")
+    else:
+        log("[mitm] Capturing traffic — exercise the app now "
+            f"(stop via Crucible or touch {mitm_sentinel.name})")
+        status("mitm_capture", "Capturing traffic — stop when ready", "running")
     elapsed = 0
     stop_reason = None
     while True:
@@ -4405,6 +4472,76 @@ def mitm_capture(target_process: str, platform: str, device: str,
             frida_proc.wait(timeout=5)
         except Exception:
             pass
+        if _t_frida is not None:
+            try:
+                _t_frida.join(timeout=3)
+            except Exception:
+                pass
+        if instrumentation_hooks and _inst_hooks_loaded:
+            _inst_data = {
+                "ssl_bypass_active": False, "ssl_pinning_found": False,
+                "root_detection_found": False, "root_bypass_active": False,
+                "no_screenshot_protection": False, "hook_log": [],
+            }
+            for line in _frida_lines:
+                ll = line.lower()
+                if "ssl" in ll and ("bypass" in ll or "unpin" in ll):
+                    _inst_data["ssl_bypass_active"] = True
+                    _inst_data["ssl_pinning_found"] = True
+                if "root" in ll and "bypass" in ll:
+                    _inst_data["root_bypass_active"] = True
+                    _inst_data["root_detection_found"] = True
+                if "screenshot" in ll and "no protection" in ll:
+                    _inst_data["no_screenshot_protection"] = True
+            frida_log_file = mitm_dir / "frida_instrumentation_output.log"
+            frida_log_file.write_text("\n".join(_frida_lines), encoding="utf-8")
+            log(f"[mitm] Frida instrumentation output saved — {len(_frida_lines)} line(s)")
+            if _inst_data["root_detection_found"] and not _inst_data["root_bypass_active"]:
+                finding(
+                    title="Root/Jailbreak Detection Present",
+                    severity="INFO",
+                    description=(
+                        "The application implements root/jailbreak detection. "
+                        "This was detected by Frida hooking known detection "
+                        "methods. The detection was bypassed for testing."),
+                    output="\n".join(l for l in _frida_lines if "root" in l.lower())[:4096],
+                    data={"catalogue_id": "QUILL-INST-001",
+                          "affected": target_process,
+                          "remediation": "N/A — informational finding about detection presence."},
+                )
+            if _inst_data["ssl_pinning_found"]:
+                finding(
+                    title="SSL Certificate Pinning Implemented",
+                    severity="INFO",
+                    description=(
+                        "The application implements SSL certificate pinning. "
+                        "Pinning was bypassed via Frida for MITM analysis."),
+                    output="\n".join(l for l in _frida_lines if "ssl" in l.lower())[:4096],
+                    data={"catalogue_id": "QUILL-INST-002",
+                          "affected": target_process,
+                          "remediation": "N/A — informational finding. Pinning is a defense."},
+                )
+            if _inst_data["no_screenshot_protection"]:
+                finding(
+                    title="Missing Screenshot Protection on Sensitive Screens",
+                    severity="MEDIUM",
+                    description=(
+                        "The application does not implement FLAG_SECURE (Android) "
+                        "or screenshot prevention (iOS) on sensitive screens. "
+                        "Sensitive data may appear in the recent-apps thumbnail "
+                        "and can be captured via screenshots."),
+                    output="\n".join(l for l in _frida_lines if "screenshot" in l.lower())[:4096],
+                    data={"catalogue_id": "QUILL-INST-003",
+                          "affected": target_process,
+                          "remediation": (
+                              "Set FLAG_SECURE on Activities displaying sensitive data "
+                              "(Android). On iOS, overlay a blur or placeholder in "
+                              "applicationWillResignActive. Prevent screenshots on "
+                              "login, payment, and profile screens.")},
+                )
+            _n_inst = sum(1 for k in ("root_detection_found", "ssl_pinning_found",
+                                       "no_screenshot_protection") if _inst_data[k])
+            log(f"[mitm] Instrumentation findings processed — {_n_inst} finding(s) from combined capture")
     if _ur is not None:
         try:
             _ur.write_tool_log(
@@ -5113,7 +5250,8 @@ def _load_frida_scripts(scripts_dir: Path) -> dict[str, str]:
 def _run_phases(platform: str, app_dir: Path | None, project_dir: Path,
                 device_id: str, target_process: str,
                 enabled_phases: set[str] | None,
-                frida_scripts_dir: Path) -> list:
+                frida_scripts_dir: Path,
+                mitm_combined: bool = False) -> list:
     _quill_dir = Path(__file__).resolve().parent
     if str(_quill_dir) not in sys.path:
         sys.path.insert(0, str(_quill_dir))
@@ -5194,8 +5332,11 @@ def _run_phases(platform: str, app_dir: Path | None, project_dir: Path,
         LogsPhase(),
         MemoryPhase(),
         ResiliencePhase(),
-        InstrumentationPhase(),
     ]
+    if not mitm_combined:
+        all_phases.append(InstrumentationPhase())
+    else:
+        log("[phases] Instrumentation deferred — will run combined with MITM capture")
     orch.register_all(all_phases)
 
     log("[phases] Starting phase orchestrator...")
@@ -5478,6 +5619,7 @@ def main() -> int:
                 target_process=_target_proc or "",
                 enabled_phases=_phase_set,
                 frida_scripts_dir=_frida_dir,
+                mitm_combined=run_mitm,
             )
     else:
         log("[phases] Phase system disabled (--no-phases or --phases none)")
@@ -5533,13 +5675,15 @@ def main() -> int:
                 mitm_target = "unknown"
                 log("[main] MITM target process unknown — capturing all traffic on proxy port")
             log(f"[main] MITM target process: {mitm_target}")
+        _do_combined = not _skip_phases and (_phase_set is None or "instrumentation" in (_phase_set or set()))
         flows_file = mitm_capture(
             mitm_target, platform, args.device, project_dir,
             port=args.mitm_port,
             transparent=args.mitm_transparent,
             upstream_proxy=args.mitm_upstream_proxy,
             burp_ca=args.mitm_burp_ca,
-            ignore_hosts=args.mitm_ignore_hosts)
+            ignore_hosts=args.mitm_ignore_hosts,
+            instrumentation_hooks=_do_combined)
         if flows_file:
             mitm_analyse(project_dir, flows_file)
 
