@@ -32,8 +32,16 @@ _SECRET_PATTERNS = [
     (r'(?i)(?:aws_access_key_id)\s*[=:]\s*["\']?(AKIA[A-Z0-9]{16})["\']?', "AWS Access Key"),
     (r'(?i)(?:aws_secret_access_key)\s*[=:]\s*["\']?([A-Za-z0-9/+=]{40})["\']?', "AWS Secret Key"),
     (r'(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,}', "GitHub Token"),
+    # --- AI / LLM provider keys (specific patterns before generic sk-) ---
+    (r'sk-ant-api03-[A-Za-z0-9]{93}', "Anthropic API Key"),
+    (r'sk-proj-[A-Za-z0-9_\-]{20,}', "OpenAI Project API Key"),
+    (r'hf_[A-Za-z]{34}', "HuggingFace Access Token"),
+    (r'AIza[A-Za-z0-9_\-]{35}', "Google AI / Gemini API Key"),
+    (r'r8_[A-Za-z0-9]{40}', "Replicate API Token"),
+    (r'xai-[A-Za-z0-9]{40,}', "xAI / Grok API Key"),
+    (r'[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}:fx', "DeepL API Key"),
+    # --- end AI keys ---
     (r'sk-[A-Za-z0-9]{20,}', "Stripe/OpenAI Secret Key"),
-    (r'AIza[A-Za-z0-9_\-]{35}', "Google API Key"),
     (r'-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----', "Private Key"),
     (r'(?i)firebase[A-Za-z]*\.googleapis\.com', "Firebase Endpoint"),
 ]
