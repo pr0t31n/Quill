@@ -6,6 +6,9 @@ Quill integrates with Crucible v2 for managed execution, real-time log streaming
 
 ---
 
+
+> **[View full documentation on the Codex Wiki](https://wiki.pr0t31n.com/tools/quill)** — detailed features, CLI reference, findings catalogue, and integration guides.
+
 ## Features
 
 ### Dual Platform Support
