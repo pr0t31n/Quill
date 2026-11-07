@@ -856,7 +856,7 @@
       ],
       "risk": "HIGH",
       "description": "The application uses java.lang.ProcessBuilder to execute system commands.",
-      "impact": "Same as Runtime.exec() \u2014 if attacker-controlled data influences the command or arguments, arbitrary command injection is possible.",
+      "impact": "Same as Runtime.exec() — if attacker-controlled data influences the command or arguments, arbitrary command injection is possible.",
       "cwe": [
         "CWE-78"
       ],
@@ -1385,7 +1385,7 @@
       "searchsploit_terms": [],
       "metasploit_modules": [],
       "kev": false,
-      "remediation_brief": "No remediation needed \u2014 this is a positive security control. Consider strengthening with multi-layered detection.",
+      "remediation_brief": "No remediation needed — this is a positive security control. Consider strengthening with multi-layered detection.",
       "remediation_component": "Application",
       "remediation_category": "Access Control",
       "remediation_effort": "Easy",
@@ -1430,7 +1430,7 @@
       "searchsploit_terms": [],
       "metasploit_modules": [],
       "kev": false,
-      "remediation_brief": "No remediation needed \u2014 this is a positive security control.",
+      "remediation_brief": "No remediation needed — this is a positive security control.",
       "remediation_component": "Application",
       "remediation_category": "Access Control",
       "remediation_effort": "Easy",
@@ -1475,7 +1475,7 @@
       "searchsploit_terms": [],
       "metasploit_modules": [],
       "kev": false,
-      "remediation_brief": "No remediation needed \u2014 this is a positive security control.",
+      "remediation_brief": "No remediation needed — this is a positive security control.",
       "remediation_component": "Application",
       "remediation_category": "Configuration",
       "remediation_effort": "Easy",
@@ -1718,7 +1718,7 @@
     },
     {
       "id": "QUILL-APK-140",
-      "title": "APK uses only JAR signing (v1) \u2014 Janus vulnerability",
+      "title": "APK uses only JAR signing (v1) — Janus vulnerability",
       "aliases": [
         "Janus",
         "CVE-2017-13156",
@@ -2081,7 +2081,7 @@
       ],
       "risk": "INFO",
       "description": "The app uses SmsManager API (sendTextMessage/sendMultipartTextMessage) and declares the SEND_SMS permission, giving it the ability to send SMS messages programmatically.",
-      "impact": "If the app is compromised, the SMS capability can be used to send premium-rate messages (billing fraud), exfiltrate data via SMS, or participate in SMS-based social engineering campaigns \u2014 all transparent to the user.",
+      "impact": "If the app is compromised, the SMS capability can be used to send premium-rate messages (billing fraud), exfiltrate data via SMS, or participate in SMS-based social engineering campaigns — all transparent to the user.",
       "cwe": [
         "CWE-250"
       ],
@@ -2393,7 +2393,7 @@
     },
     {
       "id": "QUILL-DYN-001",
-      "title": "Dynamic: SSL pinning bypass \u2014 vulnerable (Android)",
+      "title": "Dynamic: SSL pinning bypass — vulnerable (Android)",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -2449,7 +2449,7 @@
     },
     {
       "id": "QUILL-DYN-002",
-      "title": "Dynamic: Root detection bypass \u2014 vulnerable (Android)",
+      "title": "Dynamic: Root detection bypass — vulnerable (Android)",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -2500,7 +2500,7 @@
     },
     {
       "id": "QUILL-DYN-003",
-      "title": "Dynamic: Data storage monitoring \u2014 insecure storage detected (Android)",
+      "title": "Dynamic: Data storage monitoring — insecure storage detected (Android)",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -2640,7 +2640,7 @@
     },
     {
       "id": "QUILL-DYN-010",
-      "title": "Dynamic: SSL pinning bypass \u2014 vulnerable (iOS)",
+      "title": "Dynamic: SSL pinning bypass — vulnerable (iOS)",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -2696,7 +2696,7 @@
     },
     {
       "id": "QUILL-DYN-011",
-      "title": "Dynamic: Jailbreak detection bypass \u2014 vulnerable (iOS)",
+      "title": "Dynamic: Jailbreak detection bypass — vulnerable (iOS)",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -2741,7 +2741,7 @@
     },
     {
       "id": "QUILL-DYN-012",
-      "title": "Dynamic: Keychain monitoring \u2014 insecure keychain usage (iOS)",
+      "title": "Dynamic: Keychain monitoring — insecure keychain usage (iOS)",
       "aliases": [],
       "source_tools": [
         "quill"
@@ -2796,7 +2796,7 @@
       ],
       "risk": "INFO",
       "description": "The application implements root/jailbreak detection, as identified by Frida hooking known detection methods during instrumentation.",
-      "impact": "Informational \u2014 this is a positive security control. The detection was noted during bypass for testing purposes. Verify that it covers all detection vectors and is resistant to bypass.",
+      "impact": "Informational — this is a positive security control. The detection was noted during bypass for testing purposes. Verify that it covers all detection vectors and is resistant to bypass.",
       "cwe": [],
       "cve_examples": [],
       "cvss_v3_base": null,
@@ -2818,9 +2818,9 @@
       "searchsploit_terms": [],
       "metasploit_modules": [],
       "kev": false,
-      "remediation_brief": "N/A \u2014 informational. Verify detection covers file checks, binary presence, system properties, and native integrity. Test with multiple bypass tools.",
+      "remediation_brief": "N/A — informational. Verify detection covers file checks, binary presence, system properties, and native integrity. Test with multiple bypass tools.",
       "remediation_component": "Application",
-      "remediation_category": "Tamper Resistance",
+      "remediation_category": "Physical Security",
       "remediation_effort": "Easy",
       "validation_tools": [
         "frida",
@@ -2838,7 +2838,7 @@
       ],
       "risk": "INFO",
       "description": "The application implements SSL certificate pinning, as identified by Frida intercepting pinning validation methods during instrumentation.",
-      "impact": "Informational \u2014 this is a positive security control. Pinning was bypassed for MITM analysis. Verify that the implementation is resistant to common bypass techniques.",
+      "impact": "Informational — this is a positive security control. Pinning was bypassed for MITM analysis. Verify that the implementation is resistant to common bypass techniques.",
       "cwe": [],
       "cve_examples": [],
       "cvss_v3_base": null,
@@ -2860,7 +2860,7 @@
       "searchsploit_terms": [],
       "metasploit_modules": [],
       "kev": false,
-      "remediation_brief": "N/A \u2014 informational. Verify pinning is implemented in native code, covers all TLS connections, and includes backup pins for certificate rotation.",
+      "remediation_brief": "N/A — informational. Verify pinning is implemented in native code, covers all TLS connections, and includes backup pins for certificate rotation.",
       "remediation_component": "Application",
       "remediation_category": "Cryptography",
       "remediation_effort": "Easy",
@@ -3118,7 +3118,7 @@
         "quill"
       ],
       "risk": "HIGH",
-      "description": "Pattern matching a known secret format (AWS access key, Google API key, private key, \u2026) was found in the bundle.",
+      "description": "Pattern matching a known secret format (AWS access key, Google API key, private key, …) was found in the bundle.",
       "impact": "Hard-coded secrets in client binaries are trivially recoverable by anyone with the IPA. If valid in production they grant the attacker the same privileges as the app, often including server-side actions the user is not authorised for.",
       "cwe": [
         "CWE-798"
@@ -3984,7 +3984,7 @@
         "quill"
       ],
       "risk": "CRITICAL",
-      "description": "The exported content provider is vulnerable to SQL injection \u2014 fuzz payloads returned data instead of errors, indicating unsanitised input is passed directly into SQL queries.",
+      "description": "The exported content provider is vulnerable to SQL injection — fuzz payloads returned data instead of errors, indicating unsanitised input is passed directly into SQL queries.",
       "impact": "An attacker can extract or modify all data stored by the provider via crafted SQL payloads. This may include authentication tokens, user data, and internal application state. In some cases, file-system access is possible via SQLite's ATTACH DATABASE.",
       "cwe": [
         "CWE-89"
@@ -4303,7 +4303,7 @@
       ],
       "risk": "HIGH",
       "description": "JWT tokens, bearer tokens, OAuth tokens, or Firebase/cloud tokens were found in the application's runtime logs.",
-      "impact": "Application logs can be read via ADB or by any app on older Android (pre-API 16). Leaked auth tokens enable session hijacking \u2014 an attacker can replay the token to impersonate the user.",
+      "impact": "Application logs can be read via ADB or by any app on older Android (pre-API 16). Leaked auth tokens enable session hijacking — an attacker can replay the token to impersonate the user.",
       "cwe": [
         "CWE-532"
       ],
@@ -4342,7 +4342,7 @@
       "kev": false,
       "remediation_brief": "Never log authentication tokens. Use ProGuard/R8 to strip Log.d/Log.v in release builds. Replace token values with masked placeholders in debug logs.",
       "remediation_component": "Application",
-      "remediation_category": "Logging",
+      "remediation_category": "Logging and Monitoring",
       "remediation_effort": "Easy",
       "validation_tools": [
         "adb logcat"
@@ -4397,7 +4397,7 @@
       "kev": false,
       "remediation_brief": "Remove API key logging from all code paths. Use build-type log filtering to strip debug logs from release builds.",
       "remediation_component": "Application",
-      "remediation_category": "Logging",
+      "remediation_category": "Logging and Monitoring",
       "remediation_effort": "Easy",
       "validation_tools": [
         "adb logcat"
@@ -4459,7 +4459,7 @@
       "kev": false,
       "remediation_brief": "Never log passwords or credentials at any log level. Audit all log statements in authentication flows. Use ProGuard/R8 to strip debug logging in release builds.",
       "remediation_component": "Application",
-      "remediation_category": "Logging",
+      "remediation_category": "Logging and Monitoring",
       "remediation_effort": "Easy",
       "validation_tools": [
         "adb logcat"
@@ -4514,7 +4514,7 @@
       "kev": false,
       "remediation_brief": "Mask or redact PII in all log statements. Log only identifiers or hashed values when referencing user data. Review logging in user profile, payment, and registration flows.",
       "remediation_component": "Application",
-      "remediation_category": "Logging",
+      "remediation_category": "Logging and Monitoring",
       "remediation_effort": "Easy",
       "validation_tools": [
         "adb logcat"
@@ -4564,7 +4564,7 @@
       "kev": false,
       "remediation_brief": "Remove internal URLs from log output. Use environment-aware logging that masks backend URLs in release builds.",
       "remediation_component": "Application",
-      "remediation_category": "Logging",
+      "remediation_category": "Logging and Monitoring",
       "remediation_effort": "Easy",
       "validation_tools": [
         "adb logcat"
@@ -4582,7 +4582,7 @@
       ],
       "risk": "INFO",
       "description": "Stack traces referencing sensitive framework classes (javax.crypto, SecurityKeystore, CCCrypt, BiometricPrompt, SQLCipher, etc.) appear in the runtime logs.",
-      "impact": "Stack traces reveal internal implementation details \u2014 which crypto libraries, keystore wrappers, and security mechanisms the app uses. This aids targeted attack development against specific implementations.",
+      "impact": "Stack traces reveal internal implementation details — which crypto libraries, keystore wrappers, and security mechanisms the app uses. This aids targeted attack development against specific implementations.",
       "cwe": [
         "CWE-209"
       ],
@@ -4608,7 +4608,7 @@
       "kev": false,
       "remediation_brief": "Catch exceptions at security boundaries and log a generic error. Never log full stack traces in production. Use a crash reporting service that redacts sensitive frames.",
       "remediation_component": "Application",
-      "remediation_category": "Logging",
+      "remediation_category": "Logging and Monitoring",
       "remediation_effort": "Easy",
       "validation_tools": [
         "adb logcat"
@@ -4653,7 +4653,7 @@
       "kev": false,
       "remediation_brief": "Use ProGuard/R8 to remove Log.d() and Log.v() calls from release builds. Use a logging framework with build-type-aware filtering (Timber, OSLog).",
       "remediation_component": "Application",
-      "remediation_category": "Logging",
+      "remediation_category": "Logging and Monitoring",
       "remediation_effort": "Easy",
       "validation_tools": [
         "adb logcat"
@@ -4834,7 +4834,7 @@
       ],
       "risk": "CRITICAL",
       "description": "User passwords were found in the application's process memory, indicating the app retains the plaintext password beyond the authentication moment.",
-      "impact": "An attacker with root/memory-dump capability can extract the user's actual password \u2014 not just a token. This enables credential replay against any service where the user has an account.",
+      "impact": "An attacker with root/memory-dump capability can extract the user's actual password — not just a token. This enables credential replay against any service where the user has an account.",
       "cwe": [
         "CWE-316",
         "CWE-256"
@@ -4876,7 +4876,7 @@
       "searchsploit_terms": [],
       "metasploit_modules": [],
       "kev": false,
-      "remediation_brief": "Use char[] for password handling and zero immediately after authentication. Never store the password \u2014 send it once to the server, receive a token, and discard it. Use SecureString equivalents.",
+      "remediation_brief": "Use char[] for password handling and zero immediately after authentication. Never store the password — send it once to the server, receive a token, and discard it. Use SecureString equivalents.",
       "remediation_component": "Application",
       "remediation_category": "Secret Management",
       "remediation_effort": "Moderate",
@@ -4957,7 +4957,7 @@
       ],
       "risk": "HIGH",
       "description": "Credit card numbers (matching Visa, Mastercard, Amex, Discover patterns) were found in the application's process memory.",
-      "impact": "Extracted card numbers enable financial fraud. This is a PCI DSS violation \u2014 cardholder data must never persist in cleartext memory beyond the immediate transaction.",
+      "impact": "Extracted card numbers enable financial fraud. This is a PCI DSS violation — cardholder data must never persist in cleartext memory beyond the immediate transaction.",
       "cwe": [
         "CWE-316"
       ],
@@ -4992,7 +4992,7 @@
       "searchsploit_terms": [],
       "metasploit_modules": [],
       "kev": false,
-      "remediation_brief": "Use a PCI-compliant payment SDK that handles card data in its own isolated process. Never store card numbers in app memory \u2014 tokenise at the point of entry.",
+      "remediation_brief": "Use a PCI-compliant payment SDK that handles card data in its own isolated process. Never store card numbers in app memory — tokenise at the point of entry.",
       "remediation_component": "Application",
       "remediation_category": "Data Protection",
       "remediation_effort": "Significant",
@@ -5102,7 +5102,7 @@
       "searchsploit_terms": [],
       "metasploit_modules": [],
       "kev": false,
-      "remediation_brief": "Zero PIN memory immediately after verification. Use char[] and explicit zeroing. Do not cache PINs for convenience \u2014 use biometric authentication instead.",
+      "remediation_brief": "Zero PIN memory immediately after verification. Use char[] and explicit zeroing. Do not cache PINs for convenience — use biometric authentication instead.",
       "remediation_component": "Application",
       "remediation_category": "Secret Management",
       "remediation_effort": "Easy",
@@ -5120,7 +5120,7 @@
         "quill"
       ],
       "risk": "MEDIUM",
-      "description": "The device clipboard contains data matching sensitive patterns (tokens, passwords, PII) \u2014 accessible to all apps.",
+      "description": "The device clipboard contains data matching sensitive patterns (tokens, passwords, PII) — accessible to all apps.",
       "impact": "Clipboard data is shared system-wide. On older Android and iOS, any app can read it silently. Sensitive data in the clipboard persists until overwritten and can be harvested by clipboard-monitoring malware.",
       "cwe": [
         "CWE-200"
@@ -5173,7 +5173,7 @@
       ],
       "risk": "HIGH",
       "description": "The mobile application sends HTTP (unencrypted) traffic to a backend host. All request and response data traverses the network in plaintext.",
-      "impact": "An on-path attacker (shared Wi-Fi, compromised router, ISP-level) can read every byte of the communication \u2014 authentication tokens, personal data, API responses \u2014 and silently modify it in transit.",
+      "impact": "An on-path attacker (shared Wi-Fi, compromised router, ISP-level) can read every byte of the communication — authentication tokens, personal data, API responses — and silently modify it in transit.",
       "cwe": [
         "CWE-319"
       ],
@@ -5383,7 +5383,7 @@
       ],
       "risk": "HIGH",
       "description": "A recognizable API key or token pattern (AWS access key, Google API key, Firebase key, GitHub token, Slack token, Stripe key, Twilio key, or Bearer token) was detected in the intercepted traffic.",
-      "impact": "Exposed API keys can be extracted by any attacker with network access and used to access cloud resources, make API calls, or escalate privileges in the associated service \u2014 often without rate-limiting or audit trail that points back to the attacker.",
+      "impact": "Exposed API keys can be extracted by any attacker with network access and used to access cloud resources, make API calls, or escalate privileges in the associated service — often without rate-limiting or audit trail that points back to the attacker.",
       "cwe": [
         "CWE-798",
         "CWE-522"
@@ -5758,7 +5758,7 @@
       "kev": false,
       "remediation_brief": "Set android:debuggable=false in the release build manifest. Use ProGuard/R8 to strip debug symbols. Ensure the build pipeline never produces debuggable release APKs.",
       "remediation_component": "Configuration",
-      "remediation_category": "Build Security",
+      "remediation_category": "Supply Chain Security",
       "remediation_effort": "Easy",
       "validation_tools": [
         "aapt",
@@ -6110,7 +6110,7 @@
       ],
       "risk": "HIGH",
       "description": "Secrets (API keys, passwords, tokens, AWS keys, private keys, Firebase endpoints) were found embedded in the application binary or its bundled resources.",
-      "impact": "Anyone who downloads the app can extract these secrets using standard reverse-engineering tools (apktool, jadx, Hopper). Compromised keys grant direct access to backend APIs, cloud infrastructure, or third-party services \u2014 often with the app's full privilege set.",
+      "impact": "Anyone who downloads the app can extract these secrets using standard reverse-engineering tools (apktool, jadx, Hopper). Compromised keys grant direct access to backend APIs, cloud infrastructure, or third-party services — often with the app's full privilege set.",
       "cwe": [
         "CWE-798",
         "CWE-321"
@@ -6151,7 +6151,7 @@
       "searchsploit_terms": [],
       "metasploit_modules": [],
       "kev": false,
-      "remediation_brief": "Move secrets to a secure backend or secrets manager. Use compile-time environment variables for build-specific keys. Rotate all discovered secrets immediately \u2014 they are considered compromised once published in a binary.",
+      "remediation_brief": "Move secrets to a secure backend or secrets manager. Use compile-time environment variables for build-specific keys. Rotate all discovered secrets immediately — they are considered compromised once published in a binary.",
       "remediation_component": "Application",
       "remediation_category": "Secret Management",
       "remediation_effort": "Moderate",
@@ -6203,7 +6203,7 @@
       "kev": false,
       "remediation_brief": "Review each SDK's data collection scope. Ensure privacy policy discloses all third-party data sharing. Implement consent flows and provide opt-out mechanisms where required.",
       "remediation_component": "Application",
-      "remediation_category": "Privacy",
+      "remediation_category": "Data Protection",
       "remediation_effort": "Moderate",
       "validation_tools": [
         "exodus-privacy"
@@ -6277,7 +6277,7 @@
       ],
       "risk": "MEDIUM",
       "description": "The app runs without issue on a rooted/jailbroken device and does not detect or respond to the compromised device state.",
-      "impact": "A rooted device removes OS sandboxing \u2014 an attacker can read any app's data, hook any method via Frida, intercept all traffic, and modify the runtime environment. Without detection, the app is unaware it operates in a hostile environment.",
+      "impact": "A rooted device removes OS sandboxing — an attacker can read any app's data, hook any method via Frida, intercept all traffic, and modify the runtime environment. Without detection, the app is unaware it operates in a hostile environment.",
       "cwe": [
         "CWE-919"
       ],
@@ -6309,7 +6309,7 @@
       "kev": false,
       "remediation_brief": "Implement multi-layered root/jailbreak detection: file checks (/system/app/Superuser, /Applications/Cydia), binary presence (su, magisk), system property checks, SafetyNet/Play Integrity, and native code integrity verification.",
       "remediation_component": "Application",
-      "remediation_category": "Tamper Resistance",
+      "remediation_category": "Physical Security",
       "remediation_effort": "Moderate",
       "validation_tools": [
         "frida",
@@ -6360,7 +6360,7 @@
       "kev": false,
       "remediation_brief": "Implement detection in native code with integrity checks on the detection logic itself. Use multiple detection vectors concurrently. Integrate with server-side device attestation (Play Integrity / DeviceCheck).",
       "remediation_component": "Application",
-      "remediation_category": "Tamper Resistance",
+      "remediation_category": "Physical Security",
       "remediation_effort": "Significant",
       "validation_tools": [
         "frida",
@@ -6377,7 +6377,7 @@
         "quill"
       ],
       "risk": "MEDIUM",
-      "description": "The app does not implement SSL certificate pinning \u2014 Frida hooks detected no pinning validation in the TLS handshake path.",
+      "description": "The app does not implement SSL certificate pinning — Frida hooks detected no pinning validation in the TLS handshake path.",
       "impact": "Without pinning, a MITM attacker with a trusted CA certificate (rogue Wi-Fi, corporate proxy, compromised device) can intercept all HTTPS traffic including authentication tokens, API calls, and user data.",
       "cwe": [
         "CWE-295"
@@ -6525,7 +6525,7 @@
       "kev": false,
       "remediation_brief": "Detect Frida by checking for frida-server processes, scanning for frida-agent.so in /proc/self/maps, monitoring for D-Bus connections, and checking for default Frida listening ports (27042).",
       "remediation_component": "Application",
-      "remediation_category": "Tamper Resistance",
+      "remediation_category": "Physical Security",
       "remediation_effort": "Moderate",
       "validation_tools": [
         "frida"
@@ -6542,7 +6542,7 @@
       ],
       "risk": "LOW",
       "description": "The app runs on an Android emulator without restriction, as detected by hardware/model/qemu system properties.",
-      "impact": "Emulators provide full control over the execution environment \u2014 network interception, filesystem access, memory inspection, and automated interaction are trivial. This lowers the barrier for dynamic analysis and reverse engineering.",
+      "impact": "Emulators provide full control over the execution environment — network interception, filesystem access, memory inspection, and automated interaction are trivial. This lowers the barrier for dynamic analysis and reverse engineering.",
       "cwe": [
         "CWE-693"
       ],
@@ -6568,7 +6568,7 @@
       "kev": false,
       "remediation_brief": "Detect emulator environments via system properties (ro.hardware, ro.kernel.qemu), build characteristics (goldfish, ranchu), and sensor availability. Restrict sensitive operations on detected emulators.",
       "remediation_component": "Application",
-      "remediation_category": "Tamper Resistance",
+      "remediation_category": "Physical Security",
       "remediation_effort": "Moderate",
       "validation_tools": [
         "adb"
@@ -6585,7 +6585,7 @@
         "quill"
       ],
       "risk": "LOW",
-      "description": "The app does not set FLAG_SECURE on sensitive screens \u2014 screenshots and screen recordings can capture displayed sensitive data.",
+      "description": "The app does not set FLAG_SECURE on sensitive screens — screenshots and screen recordings can capture displayed sensitive data.",
       "impact": "Malware with accessibility permissions can take screenshots silently. The recent-apps thumbnail also captures the screen content, visible to any app that can read it.",
       "cwe": [
         "CWE-200"
@@ -6689,7 +6689,7 @@
         "quill"
       ],
       "risk": "LOW",
-      "description": "No runtime integrity verification was detected \u2014 the app does not use SafetyNet, Play Integrity API, or custom tamper-detection mechanisms.",
+      "description": "No runtime integrity verification was detected — the app does not use SafetyNet, Play Integrity API, or custom tamper-detection mechanisms.",
       "impact": "A repackaged or modified APK runs without restriction. An attacker can insert backdoors, disable security checks, or inject monitoring code and redistribute the modified app.",
       "cwe": [
         "CWE-693"
@@ -6722,7 +6722,7 @@
       "kev": false,
       "remediation_brief": "Integrate Play Integrity API (Android) or DeviceCheck/App Attest (iOS). Implement signature verification at startup. Use native code with obfuscation for integrity checks.",
       "remediation_component": "Application",
-      "remediation_category": "Tamper Resistance",
+      "remediation_category": "Physical Security",
       "remediation_effort": "Significant",
       "validation_tools": [
         "frida",
