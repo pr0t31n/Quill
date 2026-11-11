@@ -76,6 +76,14 @@ except ImportError:
     _AXMLPrinter = None
 
 _MANAGED = os.environ.get("CRUCIBLE_MANAGED", "") == "1"
+
+try:
+    import sys as _sys_ie
+    if "/opt/pr0t31n/shared" not in _sys_ie.path:
+        _sys_ie.path.insert(0, "/opt/pr0t31n/shared")
+    import pr0t31n_intel_emitter as _ie
+except ImportError:
+    _ie = None
 _findings: list = []
 _CURRENT_ROLES: str = ""
 
@@ -5131,6 +5139,11 @@ def _mitm_write_api_inventory(flows, inv_path: Path) -> None:
         log(f"[mitm-intel] API inventory written ({len(inventory)} endpoints)")
     except Exception as exc:
         err(f"API inventory write failed: {exc}")
+    if _ie and _MANAGED and inventory:
+        try:
+            _ie.emit_intel("mobile_api_endpoint", inventory, bulk=True)
+        except Exception:
+            pass
 
 
 def _mitm_write_traffic_analysis(flows, analysis_path: Path) -> None:
@@ -5168,6 +5181,11 @@ def _mitm_write_traffic_analysis(flows, analysis_path: Path) -> None:
         log(f"[mitm-intel] Traffic analysis written ({len(flows)} flows, {len(hosts)} hosts)")
     except Exception as exc:
         err(f"Traffic analysis write failed: {exc}")
+    if _ie and _MANAGED:
+        try:
+            _ie.emit_intel("mobile_traffic", analysis)
+        except Exception:
+            pass
 
 
 # ── Intelligence extraction — domains, URLs, emails ──────────────────────────
@@ -5940,6 +5958,11 @@ def _write_intel_files(project_dir: Path, platform: str, app_name: str) -> None:
             json.dumps(components_data, indent=2), encoding="utf-8")
     except Exception:
         pass
+    if _ie and _MANAGED:
+        try:
+            _ie.emit_intel("mobile_component", components_data)
+        except Exception:
+            pass
 
     # ── permissions.json ──
     perms_data = {"apps": []}
@@ -5969,6 +5992,11 @@ def _write_intel_files(project_dir: Path, platform: str, app_name: str) -> None:
             json.dumps(perms_data, indent=2), encoding="utf-8")
     except Exception:
         pass
+    if _ie and _MANAGED:
+        try:
+            _ie.emit_intel("mobile_permission", perms_data)
+        except Exception:
+            pass
 
     # ── hardening.json ──
     hardening_data = {"apps": []}
@@ -6039,6 +6067,11 @@ def _write_intel_files(project_dir: Path, platform: str, app_name: str) -> None:
             json.dumps(hardening_data, indent=2), encoding="utf-8")
     except Exception:
         pass
+    if _ie and _MANAGED:
+        try:
+            _ie.emit_intel("mobile_hardening", hardening_data)
+        except Exception:
+            pass
 
     # ── data.json ──
     data_flow = {"apps": []}
@@ -6076,6 +6109,11 @@ def _write_intel_files(project_dir: Path, platform: str, app_name: str) -> None:
             json.dumps(data_flow, indent=2), encoding="utf-8")
     except Exception:
         pass
+    if _ie and _MANAGED:
+        try:
+            _ie.emit_intel("mobile_data_flow", data_flow)
+        except Exception:
+            pass
 
     # ── domains.json ──
     url_domain = _load("url_domain_analysis.json")
@@ -6092,6 +6130,11 @@ def _write_intel_files(project_dir: Path, platform: str, app_name: str) -> None:
                 json.dumps(domains_data, indent=2), encoding="utf-8")
         except Exception:
             pass
+        if _ie and _MANAGED:
+            try:
+                _ie.emit_intel("mobile_domain", domains_data)
+            except Exception:
+                pass
 
     # ── emails.json ──
     email_data = _load("email_analysis.json")
@@ -6106,6 +6149,11 @@ def _write_intel_files(project_dir: Path, platform: str, app_name: str) -> None:
                 json.dumps(emails_out, indent=2), encoding="utf-8")
         except Exception:
             pass
+        if _ie and _MANAGED:
+            try:
+                _ie.emit_intel("mobile_email", emails_out)
+            except Exception:
+                pass
 
     log(f"[finalize] Intelligence files written (components/permissions/hardening/data/domains/emails)")
 
