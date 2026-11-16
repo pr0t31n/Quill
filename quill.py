@@ -105,6 +105,7 @@ _RUNLOG = None
 _pause = None
 _APP_TARGET = ""
 _EXTRACT_BASE: Optional[Path] = None
+_IS_DEV_BUILD = False
 _answer_queue: _queue_mod.Queue = _queue_mod.Queue()
 _ALL_PHASES = {"recon", "storage", "ipc", "logs", "memory", "resilience", "instrumentation"}
 
@@ -394,15 +395,20 @@ def analyse_info_plist(app_dir: Path, output_dir: Path) -> dict:
         log(f"[info_plist] ATS: Certificate pinning configured for {len(pinned_domains)} domain(s): {pin_list}")
     else:
         log("[info_plist] ATS: No NSPinnedDomains — no ATS-level certificate pinning configured")
+        _ats_pin_sev = "INFO" if _IS_DEV_BUILD else "MEDIUM"
+        _ats_pin_note = (" Note: This is a development build (get-task-allow=true) — "
+                         "pinning may be intentionally omitted for testing."
+                         if _IS_DEV_BUILD else "")
         finding(title="Certificate pinning not configured in App Transport Security",
-                severity="MEDIUM",
+                severity=_ats_pin_sev,
                 category="Transport Security",
                 description=("The Info.plist NSAppTransportSecurity dictionary does not contain "
                              "NSPinnedDomains. Without certificate pinning, the application "
                              "relies solely on the device trust store for TLS validation, "
                              "allowing man-in-the-middle attacks by anyone who can install a "
                              "trusted CA certificate on the device (iOS 14+ supports native "
-                             "ATS pinning via NSPinnedDomains)."),
+                             "ATS pinning via NSPinnedDomains)."
+                             + _ats_pin_note),
                 data={"catalogue_id": "QUILL-IOS-030",
                       "affected": bundle_id,
                       "remediation": "Add NSPinnedDomains to NSAppTransportSecurity in Info.plist "
@@ -451,7 +457,9 @@ def analyse_entitlements(app_dir: Path, output_dir: Path) -> None:
         log(f"[entitlements] Extracted {len(ent)} bytes of entitlement data")
         log("[entitlements] Checking get-task-allow (debuggable)...")
         if "get-task-allow" in ent and "<true/>" in ent.split("get-task-allow")[-1][:60]:
-            log("[entitlements] get-task-allow=true detected — finding emitted")
+            global _IS_DEV_BUILD
+            _IS_DEV_BUILD = True
+            log("[entitlements] get-task-allow=true detected — marking as dev build, finding emitted")
             gta_idx = ent.find("get-task-allow")
             gta_ctx = ent[max(0, gta_idx - 40):gta_idx + 80].strip()
             finding(title="Build Configuration: get-task-allow Enabled (Debuggable Binary)",
@@ -489,6 +497,20 @@ _HARDCODED_PATTERNS = [
     (re.compile(r"(?i)(?:password|passwd|secret|api_key|apikey)\s*[=:]\s*[\"'][^\"']{6,}[\"']"), "Hard-coded credential"),
 ]
 
+_CRED_FALSE_POSITIVE_RX = re.compile(
+    r"(?i)(?:password|passwd|secret|api_key|apikey)\s*[=:]\s*[\"'](\w+)[\"']")
+
+def _is_likely_false_positive_cred(match_text: str) -> bool:
+    m = _CRED_FALSE_POSITIVE_RX.search(match_text)
+    if not m:
+        return False
+    val = m.group(1)
+    if val.isalpha() and val.islower() and len(val) < 20:
+        return True
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", val) and not any(c.isdigit() for c in val):
+        return True
+    return False
+
 
 def analyse_strings(app_dir: Path, output_dir: Path) -> None:
     _check_pause()
@@ -512,7 +534,10 @@ def analyse_strings(app_dir: Path, output_dir: Path) -> None:
     def _scan(text: str, source: str) -> None:
         for rx, label in _HARDCODED_PATTERNS:
             for m in rx.finditer(text):
-                hits.append((label, m.group(0)[:80], source))
+                matched = m.group(0)[:80]
+                if label == "Hard-coded credential" and _is_likely_false_positive_cred(matched):
+                    continue
+                hits.append((label, matched, source))
 
     strings_raw = output_dir / "strings_raw.txt"
     if binary.exists() and strings_bin:
@@ -557,10 +582,18 @@ def analyse_strings(app_dir: Path, output_dir: Path) -> None:
             encoding="utf-8")
         for label, match, source in hits[:30]:
             clean_src = _clean_affected(source)
+            _secret_sev = "HIGH"
+            _secret_note = ""
+            if label == "Google API key" and any(
+                    fn in source.lower() for fn in ("googleservice-info.plist", "google-services.json")):
+                _secret_sev = "INFO"
+                _secret_note = (" This is a Firebase client API key in a standard config file — "
+                                "it is public by design and restricted by bundle ID / SHA-1.")
             finding(title=f"Information Disclosure: Potential hard-coded secret: {label}",
-                     severity="HIGH",
+                     severity=_secret_sev,
                      description=(f"Pattern matching {label} was found in {clean_src}. "
-                                   "Verify whether this is a real secret or a test fixture."),
+                                   "Verify whether this is a real secret or a test fixture."
+                                   + _secret_note),
                      data={"catalogue_id": "QUILL-IOS-030",
                            "affected": clean_src,
                            "evidence": match[:80]},
@@ -848,7 +881,7 @@ def analyse_manifest(app_dir: Path, output_dir: Path) -> dict:
                                        "remediation": f"Set android:exported=false or add a permission attribute to {name}."},
                                  output=f"AndroidManifest.xml excerpt:\n{xml_snippet}",
                                  output_file=str(out_file))
-                if is_exported and perm and perm not in defined_perms and not perm.startswith("android.permission."):
+                if is_exported and perm and perm not in defined_perms and not perm.startswith("android.permission.") and not perm.startswith("com.google.android."):
                     finding(title=f"Exported {comp_type} protected by undefined permission: {name}",
                              severity="HIGH",
                              description=(f"The {comp_type} {name} is exported and protected by permission "
@@ -968,7 +1001,10 @@ def analyse_strings_apk(app_dir: Path, output_dir: Path) -> None:
     def _scan(text: str, source: str) -> None:
         for rx, label in _HARDCODED_PATTERNS:
             for m in rx.finditer(text):
-                hits.append((label, m.group(0)[:80], source))
+                matched = m.group(0)[:80]
+                if label == "Hard-coded credential" and _is_likely_false_positive_cred(matched):
+                    continue
+                hits.append((label, matched, source))
 
     # Scan DEX files
     _dex_files = list(app_dir.rglob("*.dex"))
@@ -1027,10 +1063,18 @@ def analyse_strings_apk(app_dir: Path, output_dir: Path) -> None:
             encoding="utf-8")
         for label, match, source in hits[:30]:
             clean_src = _clean_affected(source)
+            _secret_sev = "HIGH"
+            _secret_note = ""
+            if label == "Google API key" and any(
+                    fn in source.lower() for fn in ("googleservice-info.plist", "google-services.json")):
+                _secret_sev = "INFO"
+                _secret_note = (" This is a Firebase client API key in a standard config file — "
+                                "it is public by design and restricted by bundle ID / SHA-1.")
             finding(title=f"Information Disclosure: Potential hard-coded secret: {label}",
-                     severity="HIGH",
+                     severity=_secret_sev,
                      description=(f"Pattern matching {label} was found in {clean_src}. "
-                                   "Verify whether this is a real secret or a test fixture."),
+                                   "Verify whether this is a real secret or a test fixture."
+                                   + _secret_note),
                      data={"catalogue_id": "QUILL-APK-040",
                            "affected": clean_src,
                            "evidence": match[:80]},
@@ -1290,14 +1334,17 @@ def analyse_ios_binary(app_dir: Path, output_dir: Path) -> None:
 
     if "encrypted" in results and not results["encrypted"]:
         finding(title="Binary Security: Binary Not Encrypted (FairPlay DRM Absent)",
-                severity="MEDIUM",
+                severity="INFO",
                 description=("The binary's LC_ENCRYPTION_INFO cryptid is 0, meaning FairPlay DRM "
-                             "encryption is not applied. The binary can be directly disassembled "
-                             "without needing to dump it from a running process."),
+                             "encryption is not applied. This is expected for side-loaded test IPAs "
+                             "and development builds — FairPlay is applied by App Store Connect during "
+                             "distribution. The binary can be directly disassembled without needing to "
+                             "dump it from a running process."),
                 data={"catalogue_id": "QUILL-IOS-046",
                       "affected": str(binary),
                       "remediation": "Submit through App Store Connect which applies FairPlay encryption automatically."},
-                output=f"otool -l {bin_name}: LC_ENCRYPTION_INFO cryptid=0 (not encrypted)",
+                output=f"otool -l {bin_name}: LC_ENCRYPTION_INFO cryptid=0 (not encrypted)\n"
+                       f"Note: Expected for side-loaded / development builds.",
                 output_file=str(out_file))
 
     if "symbols_stripped" in results and not results["symbols_stripped"]:
@@ -1430,6 +1477,32 @@ def analyse_ios_binary_code(app_dir: Path, output_dir: Path) -> None:
     status("ios_code", "iOS insecure API detection", "complete")
 
 
+_KNOWN_THIRD_PARTY_FRAMEWORKS = {
+    "flutter", "flutter_inappwebview", "fluttertoast", "fluttermacros",
+    "sqflite", "path_provider", "shared_preferences", "url_launcher",
+    "device_info", "package_info", "connectivity", "firebase",
+    "firebasecore", "firebaseanalytics", "firebasemessaging",
+    "googlesignin", "googleutilities", "gtmappauth", "gtmsessionfetcher",
+    "appauth", "nanopb", "promisesswift", "promisesobjc",
+    "abseilcpp", "boringssl", "grpc", "leveldb", "protobuf",
+    "sentry", "amplitude", "mixpanel", "segment", "braze",
+    "appsflyer", "onesignal", "adjust", "branch",
+    "intercom", "zendesk", "sdwebimage", "alamofire", "moya",
+    "realm", "realmswift", "kingfisher", "snapkit",
+    "lottie", "rive", "hermes", "jsi", "yoga", "react",
+    "reactcommon", "reactnative", "fbjni", "folly", "glog",
+    "flipper", "soloader", "fresco", "okhttp", "okio",
+}
+
+def _is_third_party_framework(name: str) -> bool:
+    n = name.lower().replace("-", "").replace("_", "")
+    if any(n.startswith(tp) or n == tp for tp in _KNOWN_THIRD_PARTY_FRAMEWORKS):
+        return True
+    if any(n.startswith(p) for p in ("pods_", "cocoapods", "flutter_", "rct")):
+        return True
+    return False
+
+
 def analyse_ios_frameworks(app_dir: Path, output_dir: Path) -> None:
     _check_pause()
     _save_checkpoint()
@@ -1495,15 +1568,20 @@ def analyse_ios_frameworks(app_dir: Path, output_dir: Path) -> None:
                 weak_detail.append(f"nm -u {bname}: ___stack_chk_fail absent")
             if "ARC not enabled" in weaknesses:
                 weak_detail.append(f"nm -u {bname}: _objc_release absent")
+            _fw_is_tp = _is_third_party_framework(bname)
+            _fw_sev = "INFO" if _fw_is_tp else "MEDIUM"
+            _fw_note = " (third-party dependency — vendor-controlled)" if _fw_is_tp else ""
             finding(title=f"Framework Binary Weakness: {', '.join(weaknesses)}",
-                    severity="MEDIUM",
+                    severity=_fw_sev,
                     description=(f"The {btype} binary {bname} has the following security weakness(es): "
                                  f"{', '.join(weaknesses)}. Embedded frameworks are part of the app's "
                                  f"attack surface and should meet the same binary hardening standards "
-                                 f"as the main executable."),
+                                 f"as the main executable.{_fw_note}"),
                     data={"catalogue_id": "QUILL-IOS-055",
                           "affected": f"{bname} ({btype})",
-                          "remediation": "Rebuild the framework with stack protection (-fstack-protector-all) and ARC enabled."},
+                          "remediation": "Rebuild the framework with stack protection (-fstack-protector-all) and ARC enabled."
+                                         if not _fw_is_tp else
+                                         "Update to a vendor release with hardened compiler flags, or accept risk for third-party code."},
                     output="\n".join(weak_detail),
                     output_file=str(out_file))
 
@@ -1729,7 +1807,7 @@ def analyse_ios_runtime_protections(app_dir: Path, output_dir: Path) -> None:
 
 # ── Android network security config deep parse ──
 
-def analyse_network_security_config(app_dir: Path, output_dir: Path) -> None:
+def analyse_network_security_config(app_dir: Path, output_dir: Path, manifest_data: dict = None) -> None:
     _check_pause()
     _save_checkpoint()
     log(f"[nsc] Starting Android network security config deep parse for {app_dir.name}...")
@@ -1787,6 +1865,12 @@ def analyse_network_security_config(app_dir: Path, output_dir: Path) -> None:
         return
 
     result = {"source": str(nsc_path), "findings": []}
+    _is_debuggable = bool(manifest_data and manifest_data.get("flags", {}).get("debuggable"))
+
+    debug_overrides = root.findall(".//debug-overrides")
+    if debug_overrides:
+        log(f"[nsc] Found {len(debug_overrides)} <debug-overrides> block(s) — "
+            f"{'active (debuggable build)' if _is_debuggable else 'inactive (release build)'}")
 
     base_configs = root.findall(".//base-config")
     for bc in base_configs:
@@ -1807,23 +1891,34 @@ def analyse_network_security_config(app_dir: Path, output_dir: Path) -> None:
                     output=f"network_security_config.xml:\n{bc_xml}",
                     output_file=str(out_file))
 
+    _debug_override_els = set()
+    for dov in root.findall(".//debug-overrides"):
+        for child in dov.iter():
+            _debug_override_els.add(child)
+
     domain_configs = root.findall(".//domain-config")
     for dc in domain_configs:
+        _in_debug_overrides = dc in _debug_override_els
         trust_anchors = dc.findall(".//trust-anchors/certificates")
         for cert in trust_anchors:
             src = cert.get("src", "").lower()
             if src == "user":
+                if _in_debug_overrides:
+                    log("[nsc] user cert trust inside <debug-overrides> — skipping (debug-only config)")
+                    continue
                 domains = [d.text or d.get("domain", "") for d in dc.findall(".//domain")]
                 domain_list = ", ".join(d for d in domains if d)
                 log(f"[nsc] domain-config trusts user certificates for: {domain_list}")
                 result["findings"].append(f"user_cert_trust:{domain_list}")
                 dc_xml = ET.tostring(dc, encoding="unicode")[:500]
+                _user_cert_sev = "INFO" if _is_debuggable else "HIGH"
+                _user_cert_note = " (debuggable build — downgraded)" if _is_debuggable else ""
                 finding(title=f"Mobile Security: Domain config trusts user installed certificates",
-                        severity="HIGH",
+                        severity=_user_cert_sev,
                         description=(f"The network security config trusts user-installed CA certificates "
                                      f"for domain(s): {domain_list or '(unspecified)'}. An attacker who "
                                      f"installs a rogue CA on the device can intercept HTTPS traffic "
-                                     f"to these domains."),
+                                     f"to these domains.{_user_cert_note}"),
                         data={"catalogue_id": "QUILL-APK-091",
                               "affected": domain_list or str(nsc_path),
                               "remediation": "Remove user certificates from trust-anchors; pin to specific CAs."},
@@ -1854,15 +1949,18 @@ def analyse_network_security_config(app_dir: Path, output_dir: Path) -> None:
 
     pin_sets = tree.findall(".//pin-set") if tree is not None else []
     if not pin_sets:
+        _pin_sev = "INFO" if _is_debuggable else "MEDIUM"
+        _pin_note = " This is a debuggable build — pinning is typically configured only for release." if _is_debuggable else ""
         log("[nsc] No <pin-set> elements found — certificate pinning not configured via NSC")
         result["findings"].append("no_pin_set")
         finding(title="Certificate pinning not configured in network security config",
-                severity="MEDIUM",
+                severity=_pin_sev,
                 category="Transport Security",
                 description=("The network_security_config.xml does not contain any <pin-set> "
                              "elements. Without certificate pinning, the application relies solely "
                              "on the device trust store for TLS validation, allowing man-in-the-middle "
-                             "attacks by anyone who can install a trusted CA certificate on the device."),
+                             "attacks by anyone who can install a trusted CA certificate on the device."
+                             + _pin_note),
                 data={"catalogue_id": "QUILL-APK-146",
                       "affected": str(nsc_path),
                       "remediation": "Add <pin-set> with backup pins for critical domains. "
@@ -2015,14 +2113,14 @@ _DEX_SAST_PATTERNS = [
      "The application references DES or 3DES. DES uses a 56-bit key "
      "and is trivially brute-forced on modern hardware.",
      "Replace DES/3DES with AES-256."),
-    (re.compile(r"/ECB/"),
+    (re.compile(r"(?<!RSA)/ECB/"),
      "ECB cipher mode (pattern leakage)", "HIGH", "QUILL-APK-116",
      "The application uses ECB cipher mode. ECB leaks plaintext patterns "
      "since identical plaintext blocks produce identical ciphertext blocks.",
      "Use CBC with random IV, or preferably GCM mode."),
-    (re.compile(r"(?:rawQuery|execSQL|compileStatement)\s*\("),
+    (re.compile(r"(?:rawQuery|execSQL)\s*\("),
      "Raw SQL query execution", "MEDIUM", "QUILL-APK-136",
-     "The application executes raw SQL queries which may be vulnerable "
+     "The application executes rawQuery() or execSQL() which may be vulnerable "
      "to SQL injection if user input is concatenated into the query string.",
      "Use parameterised queries (query() with selectionArgs, or Room DAO)."),
     (re.compile(r"(?:OkHttpClientProvider\.setOkHttpClientFactory|\.cache\s*\(\s*new\s+Cache|CacheControl\.FORCE_CACHE)"),
@@ -3634,6 +3732,11 @@ _THIRD_PARTY_SUFFIXES = (
     ".firebaseio.com", ".firebaseapp.com",
     ".crashlytics.com",
     ".app-measurement.com",
+    ".cookieyes.com",
+    ".hs-analytics.net",
+    ".hs-scripts.com",
+    ".braze.com",
+    ".optimizely.com",
 )
 
 def _is_third_party(host):
@@ -3944,6 +4047,19 @@ _SECURITY_HEADERS = {
 
 _AUTH_URL_PATTERNS = re.compile(
     r'(?:login|signin|sign-in|authenticate|auth|oauth|token|session)', re.IGNORECASE)
+
+def _luhn_check(num_str: str) -> bool:
+    digits = [int(c) for c in num_str if c.isdigit()]
+    if len(digits) < 12:
+        return False
+    total = 0
+    for i, d in enumerate(reversed(digits)):
+        if i % 2 == 1:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return total % 10 == 0
 
 _PII_BODY_PATTERNS = {
     "ssn": re.compile(r'\b\d{3}-\d{2}-\d{4}\b'),
@@ -4690,30 +4806,6 @@ def mitm_capture(target_process: str, platform: str, device: str,
     return flows_file
 
 
-_THIRD_PARTY_SUFFIXES = (
-    ".typeform.com", ".ampproject.org", ".googleapis.com",
-    ".gstatic.com", ".google-analytics.com", ".googletagmanager.com",
-    ".googlesyndication.com", ".doubleclick.net", ".facebook.com",
-    ".facebook.net", ".fbcdn.net", ".twitter.com", ".twimg.com",
-    ".cloudflare.com", ".cdn.cloudflare.com", ".cloudfront.net",
-    ".akamai.net", ".akamaized.net", ".fastly.net",
-    ".newrelic.com", ".nr-data.net", ".sentry.io",
-    ".datadoghq.com", ".segment.io", ".segment.com",
-    ".mixpanel.com", ".amplitude.com", ".braze.com",
-    ".intercom.io", ".intercomcdn.com", ".zendesk.com",
-    ".hotjar.com", ".fullstory.com", ".optimizely.com",
-    ".launchdarkly.com", ".appsflyer.com", ".branch.io",
-    ".adjust.com", ".onesignal.com", ".pusher.com",
-    ".pubnub.com", ".firebase.google.com", ".firebaseio.com",
-    ".crashlytics.com", ".app-measurement.com",
-)
-
-
-def _is_third_party(host: str) -> bool:
-    h = host.lower()
-    return any(h.endswith(s) or h == s.lstrip(".") for s in _THIRD_PARTY_SUFFIXES)
-
-
 def mitm_analyse(output_dir: Path, flows_file: Path) -> None:
     _check_pause()
     log("[mitm-analyse] Starting traffic analysis...")
@@ -4825,23 +4917,34 @@ def _mitm_check_sensitive_bodies(flows, evidence_dir):
                 continue
             text = content.decode("utf-8", errors="replace")[:100000]
             for pat_name, pat in _PII_BODY_PATTERNS.items():
-                if pat.search(text):
-                    seq += 1
-                    ev = _write_mitm_evidence(flow, evidence_dir, seq)
-                    m = pat.search(text)
-                    matched_ctx = text[max(0, m.start()-30):m.end()+30] if m else ""
-                    finding(title=f"Sensitive Data in {src_name.title()} Body ({pat_name})",
-                            severity="MEDIUM",
-                            category="Sensitive Data Exposure",
-                            description=f"The {src_name} body to "
-                                        f"{flow.request.pretty_host} contains {pat_name} data.",
-                            data={"catalogue_id": "QUILL-MITM-003",
-                                  "affected": flow.request.pretty_host,
-                                  "command": f"{flow.request.method} {flow.request.url[:200]}",
-                                  "remediation": "Minimize sensitive data. Use tokenization for PII."
-                            }, output=f"{flow.request.method} {flow.request.url[:200]}\n{src_name} excerpt: ...{matched_ctx[:200]}...",
-                            output_file=ev[0] if ev else "")
-                    break
+                m = pat.search(text)
+                if not m:
+                    continue
+                if pat_name == "credit_card" and not _luhn_check(m.group(0)):
+                    continue
+                if pat_name == "phone":
+                    ctx_start = max(0, m.start() - 50)
+                    surrounding = text[ctx_start:m.end() + 50]
+                    if re.search(r"(?:latitude|longitude|lat|lng|lon|coord|geo|location"
+                                 r"|version|build|timestamp)\b", surrounding, re.IGNORECASE):
+                        continue
+                    if surrounding.count(".") >= 3:
+                        continue
+                seq += 1
+                ev = _write_mitm_evidence(flow, evidence_dir, seq)
+                matched_ctx = text[max(0, m.start()-30):m.end()+30]
+                finding(title=f"Sensitive Data in {src_name.title()} Body ({pat_name})",
+                        severity="MEDIUM",
+                        category="Sensitive Data Exposure",
+                        description=f"The {src_name} body to "
+                                    f"{flow.request.pretty_host} contains {pat_name} data.",
+                        data={"catalogue_id": "QUILL-MITM-003",
+                              "affected": flow.request.pretty_host,
+                              "command": f"{flow.request.method} {flow.request.url[:200]}",
+                              "remediation": "Minimize sensitive data. Use tokenization for PII."
+                        }, output=f"{flow.request.method} {flow.request.url[:200]}\n{src_name} excerpt: ...{matched_ctx[:200]}...",
+                        output_file=ev[0] if ev else "")
+                break
 
 
 def _mitm_check_security_headers(flows, evidence_dir):
@@ -5751,7 +5854,7 @@ def main() -> int:
             _check_pause()
             analyse_strings_apk(app_dir, project_dir)
             _check_pause()
-            analyse_network_security_config(app_dir, project_dir)
+            analyse_network_security_config(app_dir, project_dir, manifest_data)
             _check_pause()
             analyse_android_code(app_dir, project_dir)
             _check_pause()
