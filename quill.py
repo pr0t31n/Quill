@@ -928,6 +928,27 @@ def analyse_manifest(app_dir: Path, output_dir: Path) -> dict:
                    f"debuggable: {result['flags'].get('debuggable')}",
                    f"allowBackup: {result['flags'].get('allowBackup')}"])
 
+    if _ie and result.get("components"):
+        try:
+            _ie.emit_intel("mobile_component", {"apps": [{
+                "name": package, "platform": "android",
+                "components": result["components"],
+            }]})
+        except Exception:
+            pass
+    if _ie and result.get("flags"):
+        try:
+            checks = []
+            for flag, val in result["flags"].items():
+                if isinstance(val, bool):
+                    good = not val if flag in ("debuggable", "allowBackup", "usesCleartextTraffic") else val
+                    checks.append({"name": flag, "status": "pass" if good else "fail", "details": str(val)})
+            if checks:
+                _ie.emit_intel("mobile_hardening", {"apps": [{
+                    "name": package, "platform": "android", "checks": checks,
+                }]})
+        except Exception:
+            pass
     log(f"[manifest] AndroidManifest.xml analysis complete — {package}")
     status("manifest", "AndroidManifest.xml analysis", "complete")
     return result
@@ -982,6 +1003,15 @@ def analyse_permissions(app_dir: Path, output_dir: Path, manifest_data: dict) ->
                  output_file=str(out_file),
                  category="Android Permissions")
 
+    if _ie:
+        try:
+            _ie.emit_intel("mobile_permission", {"apps": [{
+                "name": manifest_data.get("package", ""), "platform": "android",
+                "permissions": [{"name": p, "dangerous": p in _ANDROID_DANGEROUS_PERMS} for p in perms],
+                "dangerous_count": len(dangerous), "total": len(perms),
+            }]})
+        except Exception:
+            pass
     log("[permissions] Permission analysis complete")
     status("permissions", "Permission analysis", "complete")
 
@@ -1359,6 +1389,21 @@ def analyse_ios_binary(app_dir: Path, output_dir: Path) -> None:
                 output=f"nm {bin_name}: debug symbols present (not stripped)",
                 output_file=str(out_file))
 
+    if _ie:
+        try:
+            checks = []
+            for key, val in results.items():
+                if key.startswith("_"):
+                    continue
+                if isinstance(val, bool):
+                    checks.append({"name": key, "status": "pass" if val else "fail", "details": ""})
+                elif isinstance(val, dict):
+                    checks.append({"name": key, "status": val.get("status", "unknown"), "details": val.get("details", "")})
+            _ie.emit_intel("mobile_hardening", {"apps": [{
+                "name": binary.name, "platform": "ios", "checks": checks,
+            }]})
+        except Exception:
+            pass
     log(f"[ios_binary] iOS binary mitigation analysis complete — {len(results)} check(s) evaluated")
     status("ios_binary", "iOS binary mitigations", "complete")
 
@@ -1982,6 +2027,14 @@ def analyse_network_security_config(app_dir: Path, output_dir: Path, manifest_da
                   [f"source: {nsc_path}",
                    f"findings_count: {len(result['findings'])}"])
 
+    if _ie:
+        try:
+            _ie.emit_intel("mobile_data_flow", {"apps": [{
+                "name": (manifest_data or {}).get("package", app_dir.name),
+                "platform": "android", "network_config": result,
+            }]})
+        except Exception:
+            pass
     log(f"[nsc] Network security config analysis complete — {len(result['findings'])} issue(s)")
     status("nsc", "Network security config analysis", "complete")
 
@@ -2484,6 +2537,18 @@ def detect_trackers(app_dir: Path, output_dir: Path) -> None:
                 category="Privacy",
                 output_file=str(out_file))
 
+    if _ie and found_trackers:
+        try:
+            _ie.emit_intel("mobile_data_flow", {"apps": [{
+                "name": app_dir.name, "platform": "android",
+                "trackers": [{"name": t.get("name", k), "package": k,
+                              "paths": t.get("paths", [])}
+                             for k, t in found_trackers.items()
+                             if isinstance(t, dict)] if isinstance(found_trackers, dict)
+                            else [{"name": t} for t in found_trackers],
+            }]})
+        except Exception:
+            pass
     log(f"[trackers] Tracker SDK detection complete — {len(found_trackers)} tracker(s) found")
     status("trackers", "Tracker SDK detection", "complete")
 
@@ -2598,6 +2663,14 @@ def detect_trackers_ios(app_dir: Path, output_dir: Path) -> None:
                 output_file=str(out_file),
                 category="Privacy")
 
+    if _ie and found:
+        try:
+            _ie.emit_intel("mobile_data_flow", {"apps": [{
+                "name": app_dir.name, "platform": "ios",
+                "trackers": [{"name": n} for n in found],
+            }]})
+        except Exception:
+            pass
     log(f"[trackers_ios] iOS tracker detection complete — {len(found)} tracker(s)")
     status("trackers_ios", "iOS tracker SDK detection", "complete")
 
@@ -5402,6 +5475,17 @@ def extract_domains_and_urls(app_dir: Path, output_dir: Path, platform: str) -> 
                   [f"unique_urls: {len(sorted_urls)}",
                    f"unique_domains: {len(sorted_domains)}"])
 
+    if _ie and sorted_domains:
+        try:
+            _ie.emit_intel("mobile_domain", {"apps": [{
+                "name": app_dir.name, "platform": platform,
+                "unique_domains": len(sorted_domains),
+                "unique_urls": len(sorted_urls),
+                "domains": [{"domain": d, "count": c} for d, c in sorted_domains],
+                "urls": sorted_urls[:500],
+            }]})
+        except Exception:
+            pass
     log(f"[intel_urls] Extraction complete — {len(sorted_urls)} URLs, {len(sorted_domains)} domains")
     status("intel_urls", "URL & domain extraction", "complete")
     return result
@@ -5464,6 +5548,15 @@ def extract_emails(app_dir: Path, output_dir: Path, platform: str) -> dict:
     _analysis_log(out_file, "Email extraction",
                   [f"unique_emails: {len(sorted_emails)}"])
 
+    if _ie and sorted_emails:
+        try:
+            _ie.emit_intel("mobile_email", {"apps": [{
+                "name": app_dir.name, "platform": platform,
+                "unique_emails": len(sorted_emails),
+                "emails": sorted_emails[:500],
+            }]})
+        except Exception:
+            pass
     log(f"[intel_emails] Extraction complete — {len(sorted_emails)} emails")
     status("intel_emails", "Email extraction", "complete")
     return result
