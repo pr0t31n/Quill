@@ -24,6 +24,8 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
 import uuid
 import zipfile
 import xml.etree.ElementTree as ET
@@ -58,6 +60,62 @@ try:
     from pr0t31n_pause import PauseManager as _PP
 except ImportError:
     _PP = None
+
+
+class _ProgressManager:
+    """Thread-safe checkpoint for scan recovery."""
+    def __init__(self, checkpoint_file):
+        self._file = Path(checkpoint_file)
+        self._lock = threading.Lock()
+        self._state = self._load()
+    def _load(self):
+        if self._file.exists():
+            try:
+                data = json.loads(self._file.read_text(encoding="utf-8"))
+                data.setdefault("version", 1)
+                data.setdefault("completed_phases", [])
+                data.setdefault("phase_status", {})
+                return data
+            except Exception:
+                pass
+        return {"version": 1, "started": datetime.now(timezone.utc).isoformat(),
+                "completed_phases": [], "phase_status": {}}
+    def _save(self):
+        self._file.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=str(self._file.parent), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(self._state, f, indent=2)
+            os.replace(tmp, str(self._file))
+        except Exception:
+            try: os.unlink(tmp)
+            except Exception: pass
+    def is_phase_complete(self, phase):
+        with self._lock:
+            return phase in self._state.get("completed_phases", [])
+    def set_phase_status(self, phase, status, label="", detail=""):
+        with self._lock:
+            self._state.setdefault("phase_status", {})[phase] = {
+                "status": status, "label": label or phase,
+                "detail": detail, "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            if status == "complete":
+                lst = self._state.setdefault("completed_phases", [])
+                if phase not in lst:
+                    lst.append(phase)
+            self._save()
+    def prepare_resume(self):
+        with self._lock:
+            ps = self._state.get("phase_status", {})
+            for k, v in ps.items():
+                if v.get("status") in ("running", "error"):
+                    v["status"] = "pending"
+                    v["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self._save()
+            return dict(self._state)
+
+_CHECKPOINT: "_ProgressManager | None" = None
+
 
 try:
     from androguard.core.axml import AXMLPrinter as _AXMLPrinter
@@ -5839,8 +5897,10 @@ def main() -> int:
     project_dir.mkdir(parents=True, exist_ok=True)
     log(f"[init] Output directory: {project_dir}")
 
-    global _RUN_DIR, _RUNLOG
+    global _RUN_DIR, _RUNLOG, _CHECKPOINT
     _RUN_DIR = project_dir
+    _CHECKPOINT = _ProgressManager(project_dir / "checkpoint.json")
+    _CHECKPOINT.prepare_resume()
     if _el is not None:
         try:
             _RUNLOG = _el.EventLogger(project_dir / "scan.log",
@@ -5908,30 +5968,79 @@ def main() -> int:
             return 1
         if run_static:
             _CURRENT_ROLES = "STATIC"
+            _ck = _CHECKPOINT
             _check_pause()
-            plist_data = analyse_info_plist(app_dir, project_dir)
+            if not _ck.is_phase_complete("ios_info_plist"):
+                plist_data = analyse_info_plist(app_dir, project_dir)
+                _ck.set_phase_status("ios_info_plist", "complete", "iOS: Info.plist")
+            else:
+                log("[✓] iOS: Info.plist already complete — skipping")
             _check_pause()
-            analyse_entitlements(app_dir, project_dir)
+            if not _ck.is_phase_complete("ios_entitlements"):
+                analyse_entitlements(app_dir, project_dir)
+                _ck.set_phase_status("ios_entitlements", "complete", "iOS: Entitlements")
+            else:
+                log("[✓] iOS: Entitlements already complete — skipping")
             _check_pause()
-            analyse_strings(app_dir, project_dir)
+            if not _ck.is_phase_complete("ios_strings"):
+                analyse_strings(app_dir, project_dir)
+                _ck.set_phase_status("ios_strings", "complete", "iOS: Strings")
+            else:
+                log("[✓] iOS: Strings already complete — skipping")
             _check_pause()
-            analyse_ios_binary(app_dir, project_dir)
+            if not _ck.is_phase_complete("ios_binary"):
+                analyse_ios_binary(app_dir, project_dir)
+                _ck.set_phase_status("ios_binary", "complete", "iOS: Binary Analysis")
+            else:
+                log("[✓] iOS: Binary Analysis already complete — skipping")
             _check_pause()
-            analyse_ios_binary_code(app_dir, project_dir)
+            if not _ck.is_phase_complete("ios_binary_code"):
+                analyse_ios_binary_code(app_dir, project_dir)
+                _ck.set_phase_status("ios_binary_code", "complete", "iOS: Binary Code")
+            else:
+                log("[✓] iOS: Binary Code already complete — skipping")
             _check_pause()
-            analyse_ios_frameworks(app_dir, project_dir)
+            if not _ck.is_phase_complete("ios_frameworks"):
+                analyse_ios_frameworks(app_dir, project_dir)
+                _ck.set_phase_status("ios_frameworks", "complete", "iOS: Frameworks")
+            else:
+                log("[✓] iOS: Frameworks already complete — skipping")
             _check_pause()
-            analyse_ios_permissions(app_dir, project_dir, plist_data)
+            if not _ck.is_phase_complete("ios_permissions"):
+                analyse_ios_permissions(app_dir, project_dir, plist_data)
+                _ck.set_phase_status("ios_permissions", "complete", "iOS: Permissions")
+            else:
+                log("[✓] iOS: Permissions already complete — skipping")
             _check_pause()
-            analyse_ios_runtime_protections(app_dir, project_dir)
+            if not _ck.is_phase_complete("ios_runtime_protections"):
+                analyse_ios_runtime_protections(app_dir, project_dir)
+                _ck.set_phase_status("ios_runtime_protections", "complete", "iOS: Runtime Protections")
+            else:
+                log("[✓] iOS: Runtime Protections already complete — skipping")
             _check_pause()
-            detect_trackers_ios(app_dir, project_dir)
+            if not _ck.is_phase_complete("ios_trackers"):
+                detect_trackers_ios(app_dir, project_dir)
+                _ck.set_phase_status("ios_trackers", "complete", "iOS: Trackers")
+            else:
+                log("[✓] iOS: Trackers already complete — skipping")
             _check_pause()
-            url_domain_intel = extract_domains_and_urls(app_dir, project_dir, "ios")
+            if not _ck.is_phase_complete("ios_domains_urls"):
+                url_domain_intel = extract_domains_and_urls(app_dir, project_dir, "ios")
+                _ck.set_phase_status("ios_domains_urls", "complete", "iOS: Domains & URLs")
+            else:
+                log("[✓] iOS: Domains & URLs already complete — skipping")
             _check_pause()
-            email_intel = extract_emails(app_dir, project_dir, "ios")
+            if not _ck.is_phase_complete("ios_emails"):
+                email_intel = extract_emails(app_dir, project_dir, "ios")
+                _ck.set_phase_status("ios_emails", "complete", "iOS: Emails")
+            else:
+                log("[✓] iOS: Emails already complete — skipping")
             _check_pause()
-            compute_file_hashes(Path(app_path), project_dir)
+            if not _ck.is_phase_complete("ios_hashes"):
+                compute_file_hashes(Path(app_path), project_dir)
+                _ck.set_phase_status("ios_hashes", "complete", "iOS: File Hashes")
+            else:
+                log("[✓] iOS: File Hashes already complete — skipping")
         elif not run_static:
             log("[main] Static analysis skipped (mode=dynamic)")
     elif platform == "android":
@@ -5940,36 +6049,97 @@ def main() -> int:
             return 1
         if run_static:
             _CURRENT_ROLES = "STATIC"
+            _ck = _CHECKPOINT
             _check_pause()
-            manifest_data = analyse_manifest(app_dir, project_dir)
+            if not _ck.is_phase_complete("android_manifest"):
+                manifest_data = analyse_manifest(app_dir, project_dir)
+                _ck.set_phase_status("android_manifest", "complete", "Android: Manifest")
+            else:
+                log("[✓] Android: Manifest already complete — skipping")
             _check_pause()
-            analyse_permissions(app_dir, project_dir, manifest_data)
+            if not _ck.is_phase_complete("android_permissions"):
+                analyse_permissions(app_dir, project_dir, manifest_data)
+                _ck.set_phase_status("android_permissions", "complete", "Android: Permissions")
+            else:
+                log("[✓] Android: Permissions already complete — skipping")
             _check_pause()
-            analyse_strings_apk(app_dir, project_dir)
+            if not _ck.is_phase_complete("android_strings"):
+                analyse_strings_apk(app_dir, project_dir)
+                _ck.set_phase_status("android_strings", "complete", "Android: Strings")
+            else:
+                log("[✓] Android: Strings already complete — skipping")
             _check_pause()
-            analyse_network_security_config(app_dir, project_dir, manifest_data)
+            if not _ck.is_phase_complete("android_network_security"):
+                analyse_network_security_config(app_dir, project_dir, manifest_data)
+                _ck.set_phase_status("android_network_security", "complete", "Android: Network Security Config")
+            else:
+                log("[✓] Android: Network Security Config already complete — skipping")
             _check_pause()
-            analyse_android_code(app_dir, project_dir)
+            if not _ck.is_phase_complete("android_code"):
+                analyse_android_code(app_dir, project_dir)
+                _ck.set_phase_status("android_code", "complete", "Android: Code Analysis")
+            else:
+                log("[✓] Android: Code Analysis already complete — skipping")
             _check_pause()
-            analyse_runtime_protections(app_dir, project_dir)
+            if not _ck.is_phase_complete("android_runtime_protections"):
+                analyse_runtime_protections(app_dir, project_dir)
+                _ck.set_phase_status("android_runtime_protections", "complete", "Android: Runtime Protections")
+            else:
+                log("[✓] Android: Runtime Protections already complete — skipping")
             _check_pause()
-            detect_trackers(app_dir, project_dir)
+            if not _ck.is_phase_complete("android_trackers"):
+                detect_trackers(app_dir, project_dir)
+                _ck.set_phase_status("android_trackers", "complete", "Android: Trackers")
+            else:
+                log("[✓] Android: Trackers already complete — skipping")
             _check_pause()
-            analyse_apkid(app_dir, project_dir)
+            if not _ck.is_phase_complete("android_apkid"):
+                analyse_apkid(app_dir, project_dir)
+                _ck.set_phase_status("android_apkid", "complete", "Android: APKiD")
+            else:
+                log("[✓] Android: APKiD already complete — skipping")
             _check_pause()
-            detect_firebase(app_dir, project_dir)
+            if not _ck.is_phase_complete("android_firebase"):
+                detect_firebase(app_dir, project_dir)
+                _ck.set_phase_status("android_firebase", "complete", "Android: Firebase")
+            else:
+                log("[✓] Android: Firebase already complete — skipping")
             _check_pause()
-            analyse_signing(Path(app_path), app_dir, project_dir)
+            if not _ck.is_phase_complete("android_signing"):
+                analyse_signing(Path(app_path), app_dir, project_dir)
+                _ck.set_phase_status("android_signing", "complete", "Android: Signing")
+            else:
+                log("[✓] Android: Signing already complete — skipping")
             _check_pause()
-            analyse_browsable_activities(app_dir, project_dir, manifest_data)
+            if not _ck.is_phase_complete("android_browsable"):
+                analyse_browsable_activities(app_dir, project_dir, manifest_data)
+                _ck.set_phase_status("android_browsable", "complete", "Android: Browsable Activities")
+            else:
+                log("[✓] Android: Browsable Activities already complete — skipping")
             _check_pause()
-            analyse_behaviour_patterns(app_dir, project_dir, manifest_data)
+            if not _ck.is_phase_complete("android_behaviour"):
+                analyse_behaviour_patterns(app_dir, project_dir, manifest_data)
+                _ck.set_phase_status("android_behaviour", "complete", "Android: Behaviour Patterns")
+            else:
+                log("[✓] Android: Behaviour Patterns already complete — skipping")
             _check_pause()
-            url_domain_intel = extract_domains_and_urls(app_dir, project_dir, "android")
+            if not _ck.is_phase_complete("android_domains_urls"):
+                url_domain_intel = extract_domains_and_urls(app_dir, project_dir, "android")
+                _ck.set_phase_status("android_domains_urls", "complete", "Android: Domains & URLs")
+            else:
+                log("[✓] Android: Domains & URLs already complete — skipping")
             _check_pause()
-            email_intel = extract_emails(app_dir, project_dir, "android")
+            if not _ck.is_phase_complete("android_emails"):
+                email_intel = extract_emails(app_dir, project_dir, "android")
+                _ck.set_phase_status("android_emails", "complete", "Android: Emails")
+            else:
+                log("[✓] Android: Emails already complete — skipping")
             _check_pause()
-            compute_file_hashes(Path(app_path), project_dir)
+            if not _ck.is_phase_complete("android_hashes"):
+                compute_file_hashes(Path(app_path), project_dir)
+                _ck.set_phase_status("android_hashes", "complete", "Android: File Hashes")
+            else:
+                log("[✓] Android: File Hashes already complete — skipping")
         elif not run_static:
             log("[main] Static analysis skipped (mode=dynamic)")
 
@@ -6037,12 +6207,18 @@ def main() -> int:
         _do_combined = not _skip_phases and (_phase_set is None or "instrumentation" in (_phase_set or set()))
 
         def _mitm_pre_wait():
-            if not _skip_phases:
+            if not _skip_phases and not _CHECKPOINT.is_phase_complete("phase_system"):
                 log("[main] Running phase system while MITM proxy captures traffic...")
                 _run_phases_block()
-            if run_dynamic and _dyn_target:
+                _CHECKPOINT.set_phase_status("phase_system", "complete", "Phase System")
+            elif _CHECKPOINT.is_phase_complete("phase_system"):
+                log("[✓] Phase system already complete — skipping")
+            if run_dynamic and _dyn_target and not _CHECKPOINT.is_phase_complete("dynamic_analysis"):
                 log("[main] Running dynamic Frida checks while MITM proxy captures traffic...")
                 dynamic_analysis(_dyn_target, platform, args.device, project_dir, skip_ssl=True)
+                _CHECKPOINT.set_phase_status("dynamic_analysis", "complete", "Dynamic Analysis")
+            elif _CHECKPOINT.is_phase_complete("dynamic_analysis"):
+                log("[✓] Dynamic analysis already complete — skipping")
 
         flows_file = mitm_capture(
             mitm_target, platform, args.device, project_dir,
@@ -6057,12 +6233,18 @@ def main() -> int:
             mitm_analyse(project_dir, flows_file)
     else:
         # ── No MITM — phases and dynamic run standalone ──
-        if not _skip_phases:
+        if not _skip_phases and not _CHECKPOINT.is_phase_complete("phase_system"):
             _run_phases_block()
-        if run_dynamic and _dyn_target:
+            _CHECKPOINT.set_phase_status("phase_system", "complete", "Phase System")
+        elif _CHECKPOINT.is_phase_complete("phase_system"):
+            log("[✓] Phase system already complete — skipping")
+        if run_dynamic and _dyn_target and not _CHECKPOINT.is_phase_complete("dynamic_analysis"):
             _CURRENT_ROLES = "FRIDA"
             log(f"[main] Dynamic target process resolved: {_dyn_target}")
             dynamic_analysis(_dyn_target, platform, args.device, project_dir)
+            _CHECKPOINT.set_phase_status("dynamic_analysis", "complete", "Dynamic Analysis")
+        elif _CHECKPOINT.is_phase_complete("dynamic_analysis"):
+            log("[✓] Dynamic analysis already complete — skipping")
 
     ended_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     log(f"[finalize] Analysis phases complete — writing output files...")
